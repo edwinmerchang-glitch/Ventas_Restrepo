@@ -1,21 +1,23 @@
-# ventas_app.py - Aplicación completa de gestión de ventas
+# ventas_app.py - Aplicación completa de gestión de ventas con autenticación
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import sqlite3
+import hashlib
+import secrets
 from datetime import date, datetime, timedelta
 
 # ============================================================================
 # CONFIGURACIÓN INICIAL
 # ============================================================================
 st.set_page_config(
-    page_title="Sistema de Ventas Restrepo",
+    page_title="Sistema de Unidades Vendidas Restrepo",
     page_icon="🏥",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# CSS personalizado
+# CSS personalizado (mantenido igual)
 st.markdown("""
 <style>
     /* Estilos generales */
@@ -82,11 +84,527 @@ st.markdown("""
         border: 2px solid #4caf50;
         margin-top: 10px;
     }
+    
+    /* Estilos para autenticación */
+    .login-container {
+        max-width: 400px;
+        margin: 0 auto;
+        padding: 2rem;
+        background: white;
+        border-radius: 10px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    .role-badge {
+        display: inline-block;
+        padding: 0.2rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.8rem;
+        font-weight: bold;
+    }
+    
+    .role-admin {
+        background: #ffebee;
+        color: #c62828;
+    }
+    
+    .role-vendedor {
+        background: #e8f5e9;
+        color: #2e7d32;
+    }
+    
+    .role-inventario {
+        background: #e3f2fd;
+        color: #1565c0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================================================
-# BASE DE DATOS
+# SISTEMA DE AUTENTICACIÓN
+# ============================================================================
+def hash_password(password, salt=None):
+    """Hash de contraseña con salt"""
+    if salt is None:
+        salt = secrets.token_hex(16)
+    hash_obj = hashlib.sha256()
+    hash_obj.update((password + salt).encode('utf-8'))
+    return hash_obj.hexdigest(), salt
+
+def init_auth_database():
+    """Inicializa las tablas de usuarios y roles"""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        
+        # Tabla de roles
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT UNIQUE NOT NULL,
+            descripcion TEXT,
+            permisos TEXT DEFAULT 'read'
+        )
+        """)
+        
+        # Tabla de usuarios
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            nombre_completo TEXT NOT NULL,
+            email TEXT UNIQUE,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            rol_id INTEGER,
+            activo BOOLEAN DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login TIMESTAMP,
+            FOREIGN KEY (rol_id) REFERENCES roles(id)
+        )
+        """)
+        
+        # Insertar roles por defecto si no existen
+        c.execute("SELECT COUNT(*) FROM roles")
+        if c.fetchone()[0] == 0:
+            roles = [
+                ('admin', 'Administrador del sistema', 'read,write,delete,manage_users'),
+                ('vendedor', 'Vendedor', 'read,write'),
+                ('inventario', 'Encargado de inventario', 'read,write,inventory'),
+                ('reportes', 'Solo visualización', 'read')
+            ]
+            c.executemany(
+                "INSERT INTO roles (nombre, descripcion, permisos) VALUES (?, ?, ?)",
+                roles
+            )
+        
+        # Insertar usuario admin por defecto si no existe
+        c.execute("SELECT COUNT(*) FROM usuarios WHERE username = 'admin'")
+        if c.fetchone()[0] == 0:
+            password_hash, salt = hash_password("admin123")
+            c.execute("""
+                INSERT INTO usuarios (username, nombre_completo, email, password_hash, salt, rol_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, ("admin", "Administrador Principal", "admin@drogueria.com", password_hash, salt, 1))
+        
+        conn.commit()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        st.error(f"Error al inicializar autenticación: {e}")
+        return False
+
+def check_authentication(username, password):
+    """Verifica las credenciales del usuario"""
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        
+        c.execute("""
+            SELECT u.*, r.nombre as rol_nombre, r.permisos 
+            FROM usuarios u 
+            LEFT JOIN roles r ON u.rol_id = r.id 
+            WHERE u.username = ? AND u.activo = 1
+        """, (username,))
+        
+        user = c.fetchone()
+        conn.close()
+        
+        if user:
+            # Verificar contraseña
+            stored_hash = user['password_hash']
+            salt = user['salt']
+            input_hash, _ = hash_password(password, salt)
+            
+            if input_hash == stored_hash:
+                # Actualizar último login
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute(
+                    "UPDATE usuarios SET last_login = CURRENT_TIMESTAMP WHERE id = ?",
+                    (user['id'],)
+                )
+                conn.commit()
+                conn.close()
+                
+                return {
+                    'id': user['id'],
+                    'username': user['username'],
+                    'nombre': user['nombre_completo'],
+                    'rol': user['rol_nombre'],
+                    'permisos': user['permisos'].split(',') if user['permisos'] else [],
+                    'email': user['email']
+                }
+        
+        return None
+        
+    except Exception as e:
+        st.error(f"Error en autenticación: {e}")
+        return None
+
+def has_permission(user, required_permission):
+    """Verifica si el usuario tiene el permiso requerido"""
+    if not user:
+        return False
+    return required_permission in user['permisos'] or 'admin' in user['permisos']
+
+def show_login():
+    """Muestra la pantalla de login"""
+    st.markdown("""
+    <div class="main-header">
+        <h1>🔐 Sistema de Gestión - Droguería Restrepo</h1>
+        <h3>Iniciar Sesión</h3>
+        <p>Acceso restringido al personal autorizado</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    with st.container():
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown('<div class="login-container">', unsafe_allow_html=True)
+            
+            st.markdown("### 📝 Inicio de Sesión")
+            
+            with st.form("login_form"):
+                username = st.text_input("Usuario", placeholder="Ingrese su nombre de usuario")
+                password = st.text_input("Contraseña", type="password", placeholder="Ingrese su contraseña")
+                
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    login_submitted = st.form_submit_button("🚪 Ingresar", type="primary", use_container_width=True)
+                with col_btn2:
+                    if st.form_submit_button("🔄 Limpiar", type="secondary", use_container_width=True):
+                        st.rerun()
+                
+                if login_submitted:
+                    if not username or not password:
+                        st.error("❌ Por favor complete todos los campos")
+                    else:
+                        with st.spinner("Verificando credenciales..."):
+                            user = check_authentication(username, password)
+                            if user:
+                                st.session_state.user = user
+                                st.session_state.authenticated = True
+                                st.session_state.page = 'inicio'
+                                st.success(f"✅ Bienvenido, {user['nombre']}!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Usuario o contraseña incorrectos")
+            
+            st.divider()
+            st.markdown("### ℹ️ Información")
+            st.info("""
+            **Credenciales por defecto:**
+            - Usuario: `admin`
+            - Contraseña: `admin123`
+            
+            **Nota:** Cambie estas credenciales después del primer inicio.
+            """)
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+
+def show_user_management():
+    """Gestión de usuarios (solo para administradores)"""
+    if not has_permission(st.session_state.get('user'), 'manage_users'):
+        st.error("⛔ No tiene permisos para acceder a esta sección")
+        return
+    
+    st.title("👥 Gestión de Usuarios")
+    
+    # Tabs para diferentes funcionalidades
+    tab1, tab2, tab3 = st.tabs(["📋 Lista de Usuarios", "➕ Nuevo Usuario", "⚙️ Roles y Permisos"])
+    
+    with tab1:
+        try:
+            conn = get_connection()
+            usuarios = pd.read_sql("""
+                SELECT 
+                    u.id,
+                    u.username,
+                    u.nombre_completo,
+                    u.email,
+                    r.nombre as rol,
+                    u.activo,
+                    u.last_login,
+                    u.created_at
+                FROM usuarios u
+                LEFT JOIN roles r ON u.rol_id = r.id
+                ORDER BY u.created_at DESC
+            """, conn)
+            
+            if not usuarios.empty:
+                # Formatear columnas
+                usuarios['Estado'] = usuarios['activo'].apply(lambda x: '✅ Activo' if x else '❌ Inactivo')
+                usuarios['Último login'] = pd.to_datetime(usuarios['last_login']).dt.strftime('%Y-%m-%d %H:%M')
+                usuarios['Creado'] = pd.to_datetime(usuarios['created_at']).dt.strftime('%Y-%m-%d')
+                
+                # Mostrar tabla
+                st.dataframe(
+                    usuarios[['username', 'nombre_completo', 'email', 'rol', 'Estado', 'Último login', 'Creado']],
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                # Opciones por usuario
+                st.subheader("Acciones por Usuario")
+                
+                for idx, user in usuarios.iterrows():
+                    with st.expander(f"Usuario: {user['username']} - {user['nombre_completo']}"):
+                        col_u1, col_u2, col_u3 = st.columns(3)
+                        
+                        with col_u1:
+                            if st.button(f"🔄 Cambiar Estado", key=f"toggle_{user['id']}"):
+                                conn = get_connection()
+                                c = conn.cursor()
+                                nuevo_estado = 0 if user['activo'] else 1
+                                c.execute(
+                                    "UPDATE usuarios SET activo = ? WHERE id = ?",
+                                    (nuevo_estado, user['id'])
+                                )
+                                conn.commit()
+                                conn.close()
+                                st.success(f"Estado actualizado para {user['username']}")
+                                st.rerun()
+                        
+                        with col_u2:
+                            if st.button(f"🔑 Resetear Contraseña", key=f"reset_{user['id']}"):
+                                # Aquí iría la lógica para resetear contraseña
+                                st.info(f"Funcionalidad para resetear contraseña de {user['username']}")
+                        
+                        with col_u3:
+                            if user['id'] != st.session_state.user['id']:
+                                if st.button(f"🗑️ Eliminar", key=f"delete_{user['id']}", type="secondary"):
+                                    if st.checkbox(f"¿Confirmar eliminación de {user['username']}?"):
+                                        conn = get_connection()
+                                        c = conn.cursor()
+                                        c.execute("DELETE FROM usuarios WHERE id = ?", (user['id'],))
+                                        conn.commit()
+                                        conn.close()
+                                        st.success(f"Usuario {user['username']} eliminado")
+                                        st.rerun()
+            else:
+                st.info("No hay usuarios registrados")
+            
+            conn.close()
+            
+        except Exception as e:
+            st.error(f"Error al cargar usuarios: {e}")
+    
+    with tab2:
+        st.subheader("➕ Registrar Nuevo Usuario")
+        
+        with st.form("new_user_form"):
+            col_n1, col_n2 = st.columns(2)
+            
+            with col_n1:
+                new_username = st.text_input("Nombre de usuario*", placeholder="ej: jperez")
+                new_email = st.text_input("Email", placeholder="ej: juan@drogueria.com")
+                new_password = st.text_input("Contraseña*", type="password")
+            
+            with col_n2:
+                new_fullname = st.text_input("Nombre completo*", placeholder="ej: Juan Pérez")
+                
+                # Obtener roles disponibles
+                conn = get_connection()
+                roles_df = pd.read_sql("SELECT id, nombre, descripcion FROM roles", conn)
+                roles_options = {row['nombre']: row['id'] for _, row in roles_df.iterrows()}
+                conn.close()
+                
+                new_role = st.selectbox("Rol*", options=list(roles_options.keys()))
+                new_active = st.checkbox("Usuario activo", value=True)
+            
+            if st.form_submit_button("💾 Crear Usuario", type="primary"):
+                if not new_username or not new_fullname or not new_password:
+                    st.error("Por favor complete los campos obligatorios (*)")
+                else:
+                    try:
+                        # Verificar si el usuario ya existe
+                        conn = get_connection()
+                        c = conn.cursor()
+                        c.execute("SELECT COUNT(*) FROM usuarios WHERE username = ?", (new_username,))
+                        if c.fetchone()[0] > 0:
+                            st.error("El nombre de usuario ya existe")
+                        else:
+                            # Hash de contraseña
+                            password_hash, salt = hash_password(new_password)
+                            
+                            # Insertar nuevo usuario
+                            c.execute("""
+                                INSERT INTO usuarios 
+                                (username, nombre_completo, email, password_hash, salt, rol_id, activo)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (
+                                new_username,
+                                new_fullname,
+                                new_email if new_email else None,
+                                password_hash,
+                                salt,
+                                roles_options[new_role],
+                                1 if new_active else 0
+                            ))
+                            
+                            conn.commit()
+                            conn.close()
+                            
+                            st.success(f"✅ Usuario {new_username} creado exitosamente!")
+                            st.balloons()
+                            
+                    except Exception as e:
+                        st.error(f"Error al crear usuario: {e}")
+    
+    with tab3:
+        st.subheader("⚙️ Gestión de Roles")
+        
+        try:
+            conn = get_connection()
+            roles = pd.read_sql("SELECT * FROM roles", conn)
+            
+            if not roles.empty:
+                for _, rol in roles.iterrows():
+                    with st.expander(f"Rol: {rol['nombre']} - {rol['descripcion']}"):
+                        st.write(f"**ID:** {rol['id']}")
+                        st.write(f"**Permisos:** {rol['permisos']}")
+                        
+                        # Editar permisos (simplificado)
+                        if rol['nombre'] != 'admin':  # No permitir editar admin
+                            nuevos_permisos = st.text_area(
+                                "Permisos (separados por coma)",
+                                value=rol['permisos'],
+                                key=f"permisos_{rol['id']}"
+                            )
+                            
+                            if st.button("💾 Actualizar", key=f"update_{rol['id']}"):
+                                c = conn.cursor()
+                                c.execute(
+                                    "UPDATE roles SET permisos = ? WHERE id = ?",
+                                    (nuevos_permisos, rol['id'])
+                                )
+                                conn.commit()
+                                st.success("Permisos actualizados")
+                                st.rerun()
+            
+            conn.close()
+            
+        except Exception as e:
+            st.error(f"Error al cargar roles: {e}")
+
+def show_profile():
+    """Muestra y permite editar el perfil del usuario"""
+    user = st.session_state.get('user')
+    if not user:
+        return
+    
+    st.title("👤 Mi Perfil")
+    
+    col_p1, col_p2 = st.columns([1, 2])
+    
+    with col_p1:
+        st.markdown(f"""
+        <div style="text-align: center; padding: 2rem; background: #f0f2f6; border-radius: 10px;">
+            <div style="font-size: 4rem; margin-bottom: 1rem;">👤</div>
+            <h3>{user['nombre']}</h3>
+            <div class="role-badge role-{user['rol']}">{user['rol'].upper()}</div>
+            <p style="margin-top: 1rem; color: #666;">{user['username']}</p>
+            {f"<p>{user['email']}</p>" if user['email'] else ""}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.divider()
+        
+        # Estadísticas del usuario
+        try:
+            conn = get_connection()
+            stats = pd.read_sql(f"""
+                SELECT 
+                    COUNT(*) as ventas_registradas,
+                    COALESCE(SUM(cantidad_total), 0) as unidades_vendidas
+                FROM ventas 
+                WHERE empleado = ?
+            """, conn, params=(user['nombre'],))
+            
+            if not stats.empty:
+                st.markdown("### 📊 Mis Estadísticas")
+                st.metric("Ventas Registradas", int(stats['ventas_registradas'].iloc[0]))
+                st.metric("Unidades Vendidas", int(stats['unidades_vendidas'].iloc[0]))
+            
+            conn.close()
+        except:
+            pass
+    
+    with col_p2:
+        st.subheader("✏️ Editar Perfil")
+        
+        with st.form("edit_profile_form"):
+            # Obtener información actual del usuario
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("SELECT email FROM usuarios WHERE id = ?", (user['id'],))
+            current_data = c.fetchone()
+            conn.close()
+            
+            current_email = current_data['email'] if current_data else ""
+            
+            new_fullname = st.text_input("Nombre completo", value=user['nombre'])
+            new_email = st.text_input("Email", value=current_email)
+            
+            st.subheader("🔒 Cambiar Contraseña")
+            current_password = st.text_input("Contraseña actual", type="password")
+            new_password = st.text_input("Nueva contraseña", type="password")
+            confirm_password = st.text_input("Confirmar nueva contraseña", type="password")
+            
+            if st.form_submit_button("💾 Guardar Cambios", type="primary"):
+                updates = []
+                params = []
+                
+                if new_fullname != user['nombre']:
+                    updates.append("nombre_completo = ?")
+                    params.append(new_fullname)
+                
+                if new_email != current_email:
+                    updates.append("email = ?")
+                    params.append(new_email)
+                
+                # Cambiar contraseña si se proporcionó
+                if current_password and new_password:
+                    if new_password != confirm_password:
+                        st.error("Las nuevas contraseñas no coinciden")
+                    else:
+                        # Verificar contraseña actual
+                        verified_user = check_authentication(user['username'], current_password)
+                        if verified_user:
+                            password_hash, salt = hash_password(new_password)
+                            updates.append("password_hash = ?")
+                            updates.append("salt = ?")
+                            params.extend([password_hash, salt])
+                        else:
+                            st.error("Contraseña actual incorrecta")
+                
+                if updates:
+                    try:
+                        conn = get_connection()
+                        c = conn.cursor()
+                        query = f"UPDATE usuarios SET {', '.join(updates)} WHERE id = ?"
+                        params.append(user['id'])
+                        c.execute(query, params)
+                        conn.commit()
+                        conn.close()
+                        
+                        # Actualizar session_state
+                        st.session_state.user['nombre'] = new_fullname
+                        if new_email:
+                            st.session_state.user['email'] = new_email
+                        
+                        st.success("✅ Perfil actualizado correctamente")
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Error al actualizar perfil: {e}")
+                else:
+                    st.info("No hay cambios para guardar")
+
+# ============================================================================
+# BASE DE DATOS - MODIFICADA PARA SOLO UNIDADES (con autenticación)
 # ============================================================================
 DB_NAME = "ventas.db"
 
@@ -112,11 +630,18 @@ def init_database():
         # Verificar si las tablas ya existen
         c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ventas'")
         if c.fetchone() is None:
-            # Crear tablas
+            # Primero crear tablas de autenticación
+            if not init_auth_database():
+                return False
+            
+            # Luego crear tablas de ventas
             create_tables(conn)
             st.success("✅ Base de datos inicializada correctamente")
         else:
-            st.info("Base de datos ya existe")
+            # Solo verificar/crear tablas de autenticación si no existen
+            c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'")
+            if c.fetchone() is None:
+                init_auth_database()
             
         conn.close()
         return True
@@ -126,7 +651,7 @@ def init_database():
         return False
 
 def create_tables(conn=None):
-    """Crea las tablas necesarias"""
+    """Crea las tablas necesarias - MODIFICADA PARA SOLO UNIDADES"""
     close_conn = False
     try:
         if conn is None:
@@ -135,7 +660,7 @@ def create_tables(conn=None):
             
         c = conn.cursor()
         
-        # Tabla de ventas
+        # Tabla de ventas - SIN campo de valor monetario
         c.execute("""
         CREATE TABLE IF NOT EXISTS ventas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,14 +673,15 @@ def create_tables(conn=None):
             area TEXT NOT NULL,
             tipo_venta TEXT NOT NULL,
             canal TEXT NOT NULL,
-            valor REAL NOT NULL CHECK (valor >= 0),
             ticket INTEGER UNIQUE NOT NULL,
             cantidad_total INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            usuario_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
         )
         """)
         
-        # Tabla de detalle de ventas (unidades por producto)
+        # Tabla de detalle de ventas (unidades por producto) - SIN subtotal
         c.execute("""
         CREATE TABLE IF NOT EXISTS ventas_detalle (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,13 +690,11 @@ def create_tables(conn=None):
             categoria TEXT NOT NULL,
             unidad_medida TEXT NOT NULL,
             cantidad INTEGER NOT NULL CHECK (cantidad > 0),
-            precio_unitario REAL NOT NULL CHECK (precio_unitario > 0),
-            subtotal REAL NOT NULL CHECK (subtotal >= 0),
             FOREIGN KEY (venta_id) REFERENCES ventas(id) ON DELETE CASCADE
         )
         """)
         
-        # Tabla de productos/inventario
+        # Tabla de productos/inventario - SIN precio
         c.execute("""
         CREATE TABLE IF NOT EXISTS productos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -178,7 +702,6 @@ def create_tables(conn=None):
             nombre TEXT NOT NULL,
             categoria TEXT NOT NULL,
             unidad_medida TEXT NOT NULL,
-            precio REAL NOT NULL CHECK (precio > 0),
             stock INTEGER DEFAULT 0,
             activo BOOLEAN DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -208,7 +731,7 @@ def create_tables(conn=None):
             conn.close()
 
 def insert_initial_data(conn):
-    """Inserta datos iniciales en la base de datos"""
+    """Inserta datos iniciales en la base de datos - SIN PRECIOS"""
     try:
         c = conn.cursor()
         
@@ -228,27 +751,27 @@ def insert_initial_data(conn):
                 empleados
             )
         
-        # Insertar productos de ejemplo si la tabla está vacía
+        # Insertar productos de ejemplo si la tabla está vacía - SIN PRECIO
         c.execute("SELECT COUNT(*) as count FROM productos")
         if c.fetchone()[0] == 0:
             productos = [
-                ("MED001", "Paracetamol 500mg", "Medicamentos", "Caja", 15000.0, 100),
-                ("MED002", "Ibuprofeno 400mg", "Medicamentos", "Caja", 18000.0, 80),
-                ("MED003", "Amoxicilina 500mg", "Medicamentos", "Frasco", 25000.0, 50),
-                ("HIG001", "Jabón Antibacterial", "Higiene", "Unidad", 5000.0, 200),
-                ("HIG002", "Alcohol Antiséptico", "Higiene", "Botella", 12000.0, 150),
-                ("HIG003", "Tapabocas N95", "Higiene", "Caja", 30000.0, 75),
-                ("BEB001", "Agua Mineral 600ml", "Bebidas", "Botella", 2500.0, 300),
-                ("BEB002", "Gatorade 500ml", "Bebidas", "Botella", 4500.0, 150),
-                ("EQU001", "Termómetro Digital", "Equipos", "Unidad", 35000.0, 30),
-                ("EQU002", "Tensiómetro", "Equipos", "Unidad", 85000.0, 15),
-                ("COS001", "Protector Solar 50FPS", "Cosmética", "Tubo", 28000.0, 60),
-                ("COS002", "Crema Hidratante", "Cosmética", "Frasco", 22000.0, 70)
+                ("MED001", "Paracetamol 500mg", "Medicamentos", "Caja", 100),
+                ("MED002", "Ibuprofeno 400mg", "Medicamentos", "Caja", 80),
+                ("MED003", "Amoxicilina 500mg", "Medicamentos", "Frasco", 50),
+                ("HIG001", "Jabón Antibacterial", "Higiene", "Unidad", 200),
+                ("HIG002", "Alcohol Antiséptico", "Higiene", "Botella", 150),
+                ("HIG003", "Tapabocas N95", "Higiene", "Caja", 75),
+                ("BEB001", "Agua Mineral 600ml", "Bebidas", "Botella", 300),
+                ("BEB002", "Gatorade 500ml", "Bebidas", "Botella", 150),
+                ("EQU001", "Termómetro Digital", "Equipos", "Unidad", 30),
+                ("EQU002", "Tensiómetro", "Equipos", "Unidad", 15),
+                ("COS001", "Protector Solar 50FPS", "Cosmética", "Tubo", 60),
+                ("COS002", "Crema Hidratante", "Cosmética", "Frasco", 70)
             ]
             c.executemany(
                 """INSERT OR IGNORE INTO productos 
-                (codigo, nombre, categoria, unidad_medida, precio, stock) 
-                VALUES (?, ?, ?, ?, ?, ?)""",
+                (codigo, nombre, categoria, unidad_medida, stock) 
+                VALUES (?, ?, ?, ?, ?)""",
                 productos
             )
         
@@ -258,7 +781,7 @@ def insert_initial_data(conn):
         st.error(f"Error al insertar datos iniciales: {e}")
 
 def add_sample_sales():
-    """Agrega ventas de ejemplo para pruebas"""
+    """Agrega ventas de ejemplo para pruebas - MODIFICADO SIN VALOR"""
     try:
         conn = get_connection()
         c = conn.cursor()
@@ -274,7 +797,7 @@ def add_sample_sales():
         empleados = c.fetchall()
         
         # Obtener productos
-        c.execute("SELECT codigo, nombre, categoria, unidad_medida, precio FROM productos LIMIT 5")
+        c.execute("SELECT codigo, nombre, categoria, unidad_medida FROM productos LIMIT 5")
         productos = c.fetchall()
         
         if not empleados or not productos:
@@ -291,12 +814,15 @@ def add_sample_sales():
                 ticket_base = ticket_counter
                 ticket_counter += 1
                 
-                # Crear venta principal
+                # Calcular cantidad total
+                cantidad_total = 0
+                
+                # Crear venta principal SIN VALOR
                 c.execute("""
                     INSERT INTO ventas 
                     (fecha, anio, mes, dia, empleado, cargo, area, 
-                     tipo_venta, canal, valor, ticket, cantidad_total)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     tipo_venta, canal, ticket, cantidad_total)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     venta_date,
                     venta_date.year,
@@ -307,46 +833,40 @@ def add_sample_sales():
                     empleado[2],  # area
                     "Mostrador" if i % 3 == 0 else "Receta" if i % 3 == 1 else "Cross Selling",
                     "Presencial" if i % 2 == 0 else "Domicilio",
-                    0,  # Se calculará después
                     ticket_base,
-                    0   # Se calculará después
+                    0  # Se calculará después
                 ))
                 
                 venta_id = c.lastrowid
-                valor_total = 0
                 cantidad_total = 0
                 
-                # Agregar productos a la venta
+                # Agregar productos a la venta SIN PRECIO NI SUBTOTAL
                 for prod_idx, producto in enumerate(productos[:3]):  # Máximo 3 productos por venta
                     cantidad = (emp_idx * 2) + prod_idx + 1
-                    subtotal = cantidad * producto[4]  # precio
                     
                     c.execute("""
                         INSERT INTO ventas_detalle 
-                        (venta_id, producto, categoria, unidad_medida, cantidad, precio_unitario, subtotal)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        (venta_id, producto, categoria, unidad_medida, cantidad)
+                        VALUES (?, ?, ?, ?, ?)
                     """, (
                         venta_id,
                         producto[1],  # nombre
                         producto[2],  # categoria
                         producto[3],  # unidad_medida
-                        cantidad,
-                        producto[4],  # precio
-                        subtotal
+                        cantidad
                     ))
                     
-                    valor_total += subtotal
                     cantidad_total += cantidad
                 
-                # Actualizar la venta con el total
+                # Actualizar la venta con el total de unidades
                 c.execute("""
                     UPDATE ventas 
-                    SET valor = ?, cantidad_total = ?
+                    SET cantidad_total = ?
                     WHERE id = ?
-                """, (valor_total, cantidad_total, venta_id))
+                """, (cantidad_total, venta_id))
         
         conn.commit()
-        st.success(f"✅ Ventas de ejemplo agregadas")
+        st.success(f"✅ Ventas de ejemplo agregadas (solo unidades)")
         
     except Exception as e:
         st.error(f"Error al agregar ventas de ejemplo: {e}")
@@ -355,11 +875,11 @@ def add_sample_sales():
             conn.close()
 
 def get_products():
-    """Obtiene la lista de productos disponibles"""
+    """Obtiene la lista de productos disponibles - SIN PRECIO"""
     try:
         conn = get_connection()
         productos = pd.read_sql("""
-            SELECT codigo, nombre, categoria, unidad_medida, precio, stock 
+            SELECT codigo, nombre, categoria, unidad_medida, stock 
             FROM productos 
             WHERE activo = 1
             ORDER BY categoria, nombre
@@ -373,7 +893,6 @@ def get_products():
                 'nombre': row['nombre'],
                 'categoria': row['categoria'],
                 'unidad': row['unidad_medida'],
-                'precio': row['precio'],
                 'stock': row['stock']
             }
         
@@ -383,15 +902,18 @@ def get_products():
         return pd.DataFrame(), {}
 
 # ============================================================================
-# PÁGINA PRINCIPAL / INICIO
+# PÁGINA PRINCIPAL / INICIO - MODIFICADA CON AUTENTICACIÓN
 # ============================================================================
 def show_home():
-    """Muestra la página de inicio"""
-    st.markdown("""
+    """Muestra la página de inicio - SOLO UNIDADES"""
+    user = st.session_state.get('user')
+    
+    st.markdown(f"""
     <div class="main-header">
-        <h1>🏥 Sistema de Gestión de Ventas</h1>
+        <h1>🏥 Sistema de Gestión de Unidades Vendidas</h1>
         <h3>Droguería Restrepo</h3>
-        <p>Registro de unidades vendidas por el equipo de trabajo</p>
+        <p>Bienvenido, <strong>{user['nombre']}</strong> | Rol: <span class="role-badge role-{user['rol']}">{user['rol'].upper()}</span></p>
+        <p>Registro de <strong>UNIDADES</strong> vendidas por el equipo de trabajo</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -414,36 +936,40 @@ def show_home():
         
         st.stop()
     
-    # Estadísticas rápidas
-    st.header("📈 Estadísticas del Equipo")
+    # Estadísticas rápidas - SOLO UNIDADES
+    st.header("📈 Estadísticas del Equipo (Unidades)")
     
     stats = get_stats()
     col1, col2, col3, col4 = st.columns(4)
     
     with col1:
-        st.metric("💰 Venta Total", f"${stats['venta_total']:,.0f}")
+        st.metric("📦 Unidades Totales", f"{stats['unidades_total']:,}")
     
     with col2:
-        st.metric("📦 Unidades Vendidas", f"{stats['unidades_total']:,.0f}")
-    
-    with col3:
         st.metric("👥 Empleados Activos", stats['empleados_count'])
     
-    with col4:
+    with col3:
         if stats['unidades_total'] > 0:
-            prom_valor = stats['venta_total'] / stats['unidades_total']
-            st.metric("📊 Valor Promedio/Unidad", f"${prom_valor:,.0f}")
+            ventas_count = stats['ventas_count']
+            if ventas_count > 0:
+                prom_unidades = stats['unidades_total'] / ventas_count
+                st.metric("📊 Prom. por Venta", f"{prom_unidades:.1f}")
+            else:
+                st.metric("📊 Prom. por Venta", "0.0")
         else:
-            st.metric("📊 Valor Promedio/Unidad", "$0")
+            st.metric("📊 Prom. por Venta", "0.0")
     
-    # Top productos
+    with col4:
+        st.metric("📋 Ventas Registradas", stats['ventas_count'])
+    
+    # Top productos - SOLO CANTIDADES
     try:
         conn = get_connection()
         top_productos = pd.read_sql("""
             SELECT 
                 producto,
                 SUM(cantidad) as unidades_vendidas,
-                SUM(subtotal) as valor_total
+                COUNT(DISTINCT venta_id) as veces_vendido
             FROM ventas_detalle
             GROUP BY producto
             ORDER BY unidades_vendidas DESC
@@ -451,7 +977,7 @@ def show_home():
         """, conn)
         
         if not top_productos.empty:
-            st.header("🏆 Productos Más Vendidos")
+            st.header("🏆 Productos Más Vendidos (Unidades)")
             
             for idx, row in top_productos.iterrows():
                 col1, col2, col3 = st.columns([3, 2, 2])
@@ -460,7 +986,7 @@ def show_home():
                 with col2:
                     st.write(f"📦 {int(row['unidades_vendidas'])} unidades")
                 with col3:
-                    st.write(f"💰 ${row['valor_total']:,.0f}")
+                    st.write(f"🔄 {int(row['veces_vendido'])} veces")
                 st.divider()
         
         conn.close()
@@ -469,11 +995,15 @@ def show_home():
         st.info("No hay datos de productos vendidos aún")
 
 # ============================================================================
-# PÁGINA DE REGISTRO DE VENTAS
+# PÁGINA DE REGISTRO DE VENTAS - MODIFICADA CON PERMISOS
 # ============================================================================
 def show_registro():
-    """Muestra la página de registro de ventas con unidades"""
-    st.title("📝 Registro de Ventas por Unidades")
+    """Muestra la página de registro de ventas con unidades - SIN PRECIOS"""
+    if not has_permission(st.session_state.get('user'), 'write'):
+        st.error("⛔ No tiene permisos para registrar ventas")
+        return
+    
+    st.title("📝 Registro de Unidades Vendidas")
     
     # Inicializar lista de productos en session_state
     if 'productos_venta' not in st.session_state:
@@ -556,7 +1086,7 @@ def show_registro():
                     pass
         
         st.divider()
-        st.subheader("🛒 Productos Vendidos")
+        st.subheader("🛒 Productos Vendidos (Unidades)")
         
         # Selección de productos
         col_prod1, col_prod2, col_prod3 = st.columns(3)
@@ -576,13 +1106,13 @@ def show_registro():
             if producto_seleccionado:
                 producto_info = productos_dict[producto_seleccionado]
                 st.text_input("Producto", value=producto_info['nombre'], disabled=True)
-                st.text_input("Precio unitario", value=f"${producto_info['precio']:,.0f}", disabled=True)
+                st.text_input("Unidad de medida", value=producto_info['unidad'], disabled=True)
                 st.text_input("Stock disponible", value=producto_info['stock'], disabled=True)
         
         with col_prod3:
             if producto_seleccionado:
                 cantidad = st.number_input(
-                    "Cantidad",
+                    "Cantidad de unidades*",
                     min_value=1,
                     max_value=productos_dict[producto_seleccionado]['stock'],
                     step=1,
@@ -591,16 +1121,13 @@ def show_registro():
                 
                 if st.button("➕ Agregar producto", type="secondary"):
                     producto_info = productos_dict[producto_seleccionado]
-                    subtotal = cantidad * producto_info['precio']
                     
                     nuevo_producto = {
                         'codigo': producto_seleccionado,
                         'nombre': producto_info['nombre'],
                         'categoria': producto_info['categoria'],
                         'unidad': producto_info['unidad'],
-                        'cantidad': cantidad,
-                        'precio_unitario': producto_info['precio'],
-                        'subtotal': subtotal
+                        'cantidad': cantidad
                     }
                     
                     st.session_state.productos_venta.append(nuevo_producto)
@@ -610,10 +1137,9 @@ def show_registro():
         # Mostrar productos agregados
         if st.session_state.productos_venta:
             st.divider()
-            st.subheader("📋 Resumen de productos")
+            st.subheader("📋 Resumen de productos agregados")
             
             total_unidades = 0
-            total_valor = 0
             
             for i, producto in enumerate(st.session_state.productos_venta):
                 col_res1, col_res2, col_res3, col_res4 = st.columns([3, 2, 2, 1])
@@ -627,10 +1153,10 @@ def show_registro():
                     """, unsafe_allow_html=True)
                 
                 with col_res2:
-                    st.write(f"Cantidad: {producto['cantidad']}")
+                    st.write(f"Unidades: {producto['cantidad']}")
                 
                 with col_res3:
-                    st.write(f"Subtotal: ${producto['subtotal']:,.0f}")
+                    st.write(f"Stock reducido en: {producto['cantidad']}")
                 
                 with col_res4:
                     if st.button("❌", key=f"eliminar_{i}"):
@@ -638,14 +1164,12 @@ def show_registro():
                         st.rerun()
                 
                 total_unidades += producto['cantidad']
-                total_valor += producto['subtotal']
             
-            # Mostrar totales
+            # Mostrar totales - SOLO UNIDADES
             st.markdown(f"""
             <div class="total-box">
                 <h3>Total de la venta</h3>
                 <p><strong>Unidades totales:</strong> {total_unidades}</p>
-                <p><strong>Valor total:</strong> ${total_valor:,.0f}</p>
             </div>
             """, unsafe_allow_html=True)
         
@@ -679,11 +1203,12 @@ def show_registro():
                     conn = get_connection()
                     c = conn.cursor()
                     
-                    # Registrar venta principal
+                    # Registrar venta principal SIN VALOR
+                    user_id = st.session_state.user['id']
                     c.execute("""
                         INSERT INTO ventas 
                         (fecha, anio, mes, dia, empleado, cargo, area, 
-                         tipo_venta, canal, valor, ticket, cantidad_total)
+                         tipo_venta, canal, ticket, cantidad_total, usuario_id)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (
                         fecha,
@@ -695,28 +1220,25 @@ def show_registro():
                         area,
                         tipo_venta,
                         canal,
-                        total_valor,
                         ticket,
-                        total_unidades
+                        total_unidades,
+                        user_id
                     ))
                     
                     venta_id = c.lastrowid
                     
-                    # Registrar detalles de productos
+                    # Registrar detalles de productos SIN PRECIO NI SUBTOTAL
                     for producto in st.session_state.productos_venta:
                         c.execute("""
                             INSERT INTO ventas_detalle 
-                            (venta_id, producto, categoria, unidad_medida, 
-                             cantidad, precio_unitario, subtotal)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            (venta_id, producto, categoria, unidad_medida, cantidad)
+                            VALUES (?, ?, ?, ?, ?)
                         """, (
                             venta_id,
                             producto['nombre'],
                             producto['categoria'],
                             producto['unidad'],
-                            producto['cantidad'],
-                            producto['precio_unitario'],
-                            producto['subtotal']
+                            producto['cantidad']
                         ))
                         
                         # Actualizar stock
@@ -751,7 +1273,9 @@ def show_registro():
                             st.write(f"- **Tipo:** {tipo_venta}")
                             st.write(f"- **Canal:** {canal}")
                             st.write(f"- **Total unidades:** {total_unidades}")
-                            st.write(f"- **Valor total:** ${total_valor:,.0f}")
+                            st.write("- **Productos:**")
+                            for producto in st.session_state.productos_venta:
+                                st.write(f"  • {producto['nombre']}: {producto['cantidad']} {producto['unidad']}")
                     
                 except Exception as e:
                     st.error(f"❌ Error al registrar: {str(e)}")
@@ -772,12 +1296,11 @@ def check_database():
         return False
 
 def get_stats():
-    """Obtiene estadísticas generales"""
+    """Obtiene estadísticas generales - SOLO UNIDADES"""
     stats = {
-        'venta_total': 0,
+        'ventas_count': 0,
         'unidades_total': 0,
-        'empleados_count': 0,
-        'ticket_promedio': 0
+        'empleados_count': 0
     }
     
     try:
@@ -785,15 +1308,15 @@ def get_stats():
         if conn is None:
             return stats
             
-        # Venta total
-        df_total = pd.read_sql("SELECT COALESCE(SUM(valor), 0) as total FROM ventas", conn)
-        stats['venta_total'] = float(df_total['total'].iloc[0])
+        # Total de ventas
+        df_ventas = pd.read_sql("SELECT COUNT(*) as total FROM ventas", conn)
+        stats['ventas_count'] = int(df_ventas['total'].iloc[0])
         
         # Unidades totales
         df_unidades = pd.read_sql("SELECT COALESCE(SUM(cantidad_total), 0) as unidades FROM ventas", conn)
         stats['unidades_total'] = int(df_unidades['unidades'].iloc[0])
         
-        # Empleados activos
+        # Empleados activos (que han registrado ventas)
         df_empleados = pd.read_sql("SELECT COUNT(DISTINCT empleado) as empleados FROM ventas", conn)
         stats['empleados_count'] = int(df_empleados['empleados'].iloc[0])
         
@@ -805,101 +1328,154 @@ def get_stats():
     return stats
 
 # ============================================================================
-# SIDEBAR - NAVEGACIÓN PRINCIPAL
+# CONTROL PRINCIPAL DE AUTENTICACIÓN
 # ============================================================================
-with st.sidebar:
-    st.markdown("""
-    <div style="text-align: center; padding: 1rem 0;">
-        <h2>🏥 Droguería Restrepo</h2>
-        <p style="color: #666; font-size: 0.9rem;">Registro de Unidades Vendidas</p>
-    </div>
-    """, unsafe_allow_html=True)
+def main():
+    """Función principal que controla la autenticación"""
     
-    st.divider()
-    
-    # Estado de la página
+    # Inicializar estados de sesión
+    if 'authenticated' not in st.session_state:
+        st.session_state.authenticated = False
+    if 'user' not in st.session_state:
+        st.session_state.user = None
     if 'page' not in st.session_state:
         st.session_state.page = 'inicio'
     
-    # Navegación
-    st.markdown("### 📍 Navegación")
+    # Si no está autenticado, mostrar login
+    if not st.session_state.authenticated:
+        show_login()
+        return
     
-    col_nav1, col_nav2 = st.columns(2)
-    
-    with col_nav1:
-        if st.button("🏠 Inicio", use_container_width=True, type="primary"):
-            st.session_state.page = 'inicio'
-            st.rerun()
-    
-    with col_nav2:
-        if st.button("🔄 Recargar", use_container_width=True):
-            st.rerun()
-    
-    st.divider()
-    
-    # Módulos
-    st.markdown("### 📂 Módulos")
-    
-    if st.button("📝 Registrar Ventas", use_container_width=True, 
-                 help="Registrar unidades vendidas por el equipo"):
-        st.session_state.page = 'registro'
-        st.rerun()
-    
-    if st.button("📊 Ver Informes", use_container_width=True,
-                 help="Ver reportes y estadísticas"):
-        st.session_state.page = 'informes'
-        st.rerun()
-    
-    st.divider()
-    
-    # Estadísticas del día
-    st.markdown("### 📊 Hoy")
-    
-    try:
-        conn = get_connection()
-        hoy = date.today().strftime("%Y-%m-%d")
+    # ========================================================================
+    # SIDEBAR - NAVEGACIÓN PRINCIPAL - MODIFICADA CON AUTENTICACIÓN
+    # ========================================================================
+    with st.sidebar:
+        user = st.session_state.user
         
-        stats_hoy = pd.read_sql(f"""
-            SELECT 
-                COUNT(*) as ventas,
-                COALESCE(SUM(cantidad_total), 0) as unidades,
-                COALESCE(SUM(valor), 0) as total
-            FROM ventas 
-            WHERE fecha = '{hoy}'
-        """, conn)
+        st.markdown(f"""
+        <div style="text-align: center; padding: 1rem 0;">
+            <h2>🏥 Droguería Restrepo</h2>
+            <p style="color: #666; font-size: 0.9rem;">Usuario: <strong>{user['nombre']}</strong></p>
+            <div class="role-badge role-{user['rol']}" style="margin: 0.5rem auto;">{user['rol'].upper()}</div>
+        </div>
+        """, unsafe_allow_html=True)
         
-        col_today1, col_today2, col_today3 = st.columns(3)
-        with col_today1:
-            st.metric("Ventas", int(stats_hoy['ventas'].iloc[0]))
-        with col_today2:
-            st.metric("Unidades", int(stats_hoy['unidades'].iloc[0]))
-        with col_today3:
-            st.metric("Total", f"${float(stats_hoy['total'].iloc[0]):,.0f}")
+        st.divider()
+        
+        # Estado de la página
+        st.markdown("### 📍 Navegación")
+        
+        col_nav1, col_nav2 = st.columns(2)
+        
+        with col_nav1:
+            if st.button("🏠 Inicio", use_container_width=True, type="primary"):
+                st.session_state.page = 'inicio'
+                st.rerun()
+        
+        with col_nav2:
+            if st.button("🔄 Recargar", use_container_width=True):
+                st.rerun()
+        
+        st.divider()
+        
+        # Módulos principales
+        st.markdown("### 📂 Módulos")
+        
+        if st.button("📝 Registrar Unidades", use_container_width=True, 
+                     help="Registrar unidades vendidas por el equipo"):
+            st.session_state.page = 'registro'
+            st.rerun()
+        
+        if st.button("📊 Ver Informes", use_container_width=True,
+                     help="Ver reportes de unidades"):
+            st.session_state.page = 'informes'
+            st.rerun()
+        
+        # Módulos de administración (solo para admin)
+        if has_permission(user, 'manage_users'):
+            st.divider()
+            st.markdown("### ⚙️ Administración")
             
-        conn.close()
+            if st.button("👥 Gestión de Usuarios", use_container_width=True):
+                st.session_state.page = 'usuarios'
+                st.rerun()
         
-    except:
-        st.info("No hay ventas hoy")
+        # Perfil y cierre de sesión
+        st.divider()
+        st.markdown("### 👤 Mi Cuenta")
+        
+        col_acc1, col_acc2 = st.columns(2)
+        
+        with col_acc1:
+            if st.button("👤 Perfil", use_container_width=True):
+                st.session_state.page = 'perfil'
+                st.rerun()
+        
+        with col_acc2:
+            if st.button("🚪 Cerrar Sesión", use_container_width=True, type="secondary"):
+                st.session_state.authenticated = False
+                st.session_state.user = None
+                st.session_state.page = 'inicio'
+                st.rerun()
+        
+        st.divider()
+        
+        # Estadísticas del día - SOLO UNIDADES
+        st.markdown("### 📊 Hoy (Unidades)")
+        
+        try:
+            conn = get_connection()
+            hoy = date.today().strftime("%Y-%m-%d")
+            
+            stats_hoy = pd.read_sql(f"""
+                SELECT 
+                    COUNT(*) as ventas,
+                    COALESCE(SUM(cantidad_total), 0) as unidades
+                FROM ventas 
+                WHERE fecha = '{hoy}'
+            """, conn)
+            
+            col_today1, col_today2 = st.columns(2)
+            with col_today1:
+                st.metric("Ventas", int(stats_hoy['ventas'].iloc[0]))
+            with col_today2:
+                st.metric("Unidades", int(stats_hoy['unidades'].iloc[0]))
+                
+            conn.close()
+            
+        except:
+            st.info("No hay ventas hoy")
+    
+    # ========================================================================
+    # CONTENIDO PRINCIPAL BASADO EN LA PÁGINA SELECCIONADA
+    # ========================================================================
+    if st.session_state.page == 'inicio':
+        show_home()
+    elif st.session_state.page == 'registro':
+        show_registro()
+    elif st.session_state.page == 'informes':
+        st.title("📊 Informes de Unidades Vendidas")
+        st.info("En desarrollo - Solo mostrará información de unidades")
+    elif st.session_state.page == 'usuarios':
+        show_user_management()
+    elif st.session_state.page == 'perfil':
+        show_profile()
 
 # ============================================================================
-# CONTENIDO PRINCIPAL
+# EJECUCIÓN PRINCIPAL
 # ============================================================================
-if st.session_state.page == 'inicio':
-    show_home()
-elif st.session_state.page == 'registro':
-    show_registro()
-elif st.session_state.page == 'informes':
-    # La función show_informes() sigue igual que en tu código original
-    # Solo asegúrate de que exista en tu código
-    pass
+if __name__ == "__main__":
+    main()
 
 # ============================================================================
 # FOOTER
 # ============================================================================
-st.markdown("---")
-st.markdown("""
-<div style="text-align: center; color: #666; padding: 1rem;">
-    <p><strong>🏥 Sistema de Registro de Unidades Vendidas</strong></p>
-    <p>© 2024 | Versión 2.0 | Para equipo de trabajo</p>
-</div>
-""", unsafe_allow_html=True)
+if st.session_state.get('authenticated', False):
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align: center; color: #666; padding: 1rem;">
+        <p><strong>🏥 Sistema de Registro de Unidades Vendidas</strong></p>
+        <p>Solo unidades - Con sistema de autenticación</p>
+        <p>© 2024 | Versión 3.0 | Usuario: {}</p>
+    </div>
+    """.format(st.session_state.get('user', {}).get('nombre', '')), unsafe_allow_html=True)
