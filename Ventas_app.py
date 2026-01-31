@@ -49,9 +49,13 @@ st.markdown("""
 # BASE DE DATOS
 # =============================================================================
 def get_connection():
-    conn = sqlite3.connect(DB_NAME, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        conn = sqlite3.connect(DB_NAME, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception as e:
+        st.error(f"Error conectando a la base de datos: {e}")
+        return None
 
 
 def hash_password(password, salt=None):
@@ -62,137 +66,208 @@ def hash_password(password, salt=None):
 
 
 def initialize_database():
-    conn = get_connection()
-    c = conn.cursor()
+    """Inicializa la base de datos y crea las tablas si no existen"""
+    try:
+        conn = get_connection()
+        if conn is None:
+            return False
+            
+        c = conn.cursor()
 
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS roles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nombre TEXT UNIQUE,
-        permisos TEXT
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS usuarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE,
-        nombre TEXT,
-        password_hash TEXT,
-        salt TEXT,
-        rol_id INTEGER,
-        activo INTEGER DEFAULT 1
-    )
-    """)
-
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS empleados (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        codigo TEXT UNIQUE,
-        nombre TEXT,
-        cargo TEXT,
-        area TEXT,
-        telefono TEXT,
-        email TEXT,
-        activo INTEGER DEFAULT 1,
-        fecha_ingreso DATE DEFAULT CURRENT_DATE
-    )
-    """)
-
-    # Roles
-    c.execute("SELECT COUNT(*) FROM roles")
-    if c.fetchone()[0] == 0:
-        c.executemany(
-            "INSERT INTO roles (nombre, permisos) VALUES (?,?)",
-            [
-                ("admin", "all"),
-                ("gerente", "manage_employees"),
-                ("vendedor", "read")
-            ]
-        )
-
-    # Usuario admin
-    c.execute("SELECT COUNT(*) FROM usuarios WHERE username='admin'")
-    if c.fetchone()[0] == 0:
-        c.execute("SELECT id FROM roles WHERE nombre='admin'")
-        rol_id = c.fetchone()[0]
-        pwd, salt = hash_password("admin123")
+        # Tabla de roles
         c.execute("""
-        INSERT INTO usuarios (username, nombre, password_hash, salt, rol_id)
-        VALUES (?,?,?,?,?)
-        """, ("admin", "Administrador", pwd, salt, rol_id))
+        CREATE TABLE IF NOT EXISTS roles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT UNIQUE NOT NULL,
+            permisos TEXT
+        )
+        """)
 
-    # Verificar y crear empleados de ejemplo si está vacío
-    c.execute("SELECT COUNT(*) FROM empleados")
-    if c.fetchone()[0] == 0:
-        c.executemany(
-            """INSERT INTO empleados (codigo, nombre, cargo, area, telefono, email) 
-            VALUES (?,?,?,?,?,?)""",
-            [
+        # Tabla de usuarios
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            nombre TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            salt TEXT NOT NULL,
+            rol_id INTEGER NOT NULL,
+            activo INTEGER DEFAULT 1,
+            FOREIGN KEY (rol_id) REFERENCES roles (id)
+        )
+        """)
+
+        # Tabla de empleados
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS empleados (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo TEXT UNIQUE NOT NULL,
+            nombre TEXT NOT NULL,
+            cargo TEXT NOT NULL,
+            area TEXT NOT NULL,
+            telefono TEXT,
+            email TEXT,
+            activo INTEGER DEFAULT 1,
+            fecha_ingreso DATE DEFAULT CURRENT_DATE
+        )
+        """)
+
+        # Insertar roles básicos si no existen
+        roles_existentes = c.execute("SELECT nombre FROM roles").fetchall()
+        roles_existentes = [r[0] for r in roles_existentes]
+        
+        roles_base = [
+            ("admin", "all"),
+            ("gerente", "manage_employees"),
+            ("vendedor", "read")
+        ]
+        
+        for rol_nombre, permisos in roles_base:
+            if rol_nombre not in roles_existentes:
+                c.execute("INSERT INTO roles (nombre, permisos) VALUES (?, ?)", 
+                         (rol_nombre, permisos))
+
+        # Obtener ID del rol admin
+        c.execute("SELECT id FROM roles WHERE nombre='admin'")
+        rol_admin = c.fetchone()
+        
+        if rol_admin:
+            rol_admin_id = rol_admin[0]
+            
+            # Crear usuario admin si no existe
+            c.execute("SELECT COUNT(*) FROM usuarios WHERE username='admin'")
+            admin_exists = c.fetchone()[0]
+            
+            if admin_exists == 0:
+                password_hash, salt = hash_password("admin123")
+                c.execute("""
+                INSERT INTO usuarios (username, nombre, password_hash, salt, rol_id)
+                VALUES (?, ?, ?, ?, ?)
+                """, ("admin", "Administrador", password_hash, salt, rol_admin_id))
+
+        # Verificar si hay empleados, si no, crear algunos de ejemplo
+        c.execute("SELECT COUNT(*) FROM empleados")
+        if c.fetchone()[0] == 0:
+            empleados_ejemplo = [
                 ("EMP001", "Juan Pérez", "Vendedor", "Ventas", "3001234567", "juan@empresa.com"),
                 ("EMP002", "María Gómez", "Gerente", "Administración", "3109876543", "maria@empresa.com"),
                 ("EMP003", "Carlos López", "Farmacéutico", "Farmacia", "3204567890", "carlos@empresa.com")
             ]
-        )
+            
+            for emp in empleados_ejemplo:
+                try:
+                    c.execute("""
+                    INSERT INTO empleados (codigo, nombre, cargo, area, telefono, email)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """, emp)
+                except sqlite3.IntegrityError:
+                    continue
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        st.error(f"Error inicializando base de datos: {e}")
+        return False
 
 
 def check_database_ready():
+    """Verifica si la base de datos está lista"""
     try:
         conn = get_connection()
+        if conn is None:
+            return False
+            
         c = conn.cursor()
-        # Verificar que existan las tres tablas principales
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('usuarios', 'roles', 'empleados')")
-        tables = c.fetchall()
+        
+        # Verificar que existan las tablas principales
+        required_tables = ['usuarios', 'roles', 'empleados']
+        existing_tables = []
+        
+        for table in required_tables:
+            c.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+            if c.fetchone():
+                existing_tables.append(table)
+        
         conn.close()
-        return len(tables) == 3
-    except:
+        
+        if len(existing_tables) == len(required_tables):
+            return True
+        else:
+            st.warning(f"Faltan tablas: {set(required_tables) - set(existing_tables)}")
+            return False
+            
+    except Exception as e:
+        st.error(f"Error verificando base de datos: {e}")
         return False
 
 # =============================================================================
 # AUTENTICACIÓN
 # =============================================================================
 def authenticate(username, password):
+    """Autentica un usuario"""
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-    SELECT u.*, r.nombre AS rol, r.permisos
-    FROM usuarios u
-    JOIN roles r ON u.rol_id = r.id
-    WHERE u.username=? AND u.activo=1
-    """, (username,))
-    user = c.fetchone()
-    conn.close()
-
-    if not user:
+    if conn is None:
         return None
-
-    check_hash, _ = hash_password(password, user["salt"])
-    if check_hash == user["password_hash"]:
-        return {
-            "id": user["id"],
-            "username": user["username"],
-            "nombre": user["nombre"],
-            "rol": user["rol"],
-            "permisos": user["permisos"]
-        }
-    return None
+        
+    try:
+        c = conn.cursor()
+        c.execute("""
+        SELECT u.*, r.nombre AS rol, r.permisos
+        FROM usuarios u
+        JOIN roles r ON u.rol_id = r.id
+        WHERE u.username = ? AND u.activo = 1
+        """, (username,))
+        
+        user = c.fetchone()
+        
+        if not user:
+            return None
+            
+        # Verificar contraseña
+        check_hash, _ = hash_password(password, user["salt"])
+        if check_hash == user["password_hash"]:
+            return {
+                "id": user["id"],
+                "username": user["username"],
+                "nombre": user["nombre"],
+                "rol": user["rol"],
+                "permisos": user["permisos"]
+            }
+        return None
+        
+    except Exception as e:
+        st.error(f"Error en autenticación: {e}")
+        return None
+    finally:
+        conn.close()
 
 
 def has_permission(user, perm):
+    """Verifica si un usuario tiene un permiso específico"""
     if not user:
         return False
-    return user["rol"] == "admin" or perm in user["permisos"]
+    if user["rol"] == "admin":
+        return True
+    return perm in user.get("permisos", "")
 
 # =============================================================================
 # EMPLEADOS
 # =============================================================================
 def get_employees():
+    """Obtiene todos los empleados"""
     conn = get_connection()
+    if conn is None:
+        return pd.DataFrame()
+        
     try:
-        df = pd.read_sql("SELECT * FROM empleados ORDER BY nombre", conn)
+        df = pd.read_sql("""
+        SELECT id, codigo, nombre, cargo, area, telefono, email, activo, 
+               DATE(fecha_ingreso) as fecha_ingreso
+        FROM empleados 
+        ORDER BY nombre
+        """, conn)
         return df
     except Exception as e:
         st.error(f"Error al cargar empleados: {e}")
@@ -202,51 +277,71 @@ def get_employees():
 
 
 def create_employee(codigo, nombre, cargo, area, telefono, email):
+    """Crea un nuevo empleado"""
     conn = get_connection()
-    c = conn.cursor()
+    if conn is None:
+        return False, "Error de conexión"
+        
     try:
+        c = conn.cursor()
         c.execute("""
         INSERT INTO empleados (codigo, nombre, cargo, area, telefono, email)
-        VALUES (?,?,?,?,?,?)
-        """, (codigo, nombre, cargo, area, telefono, email))
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (codigo.strip(), nombre.strip(), cargo.strip(), area.strip(), telefono.strip(), email.strip()))
+        
         conn.commit()
-        return True, "Empleado creado exitosamente"
-    except sqlite3.IntegrityError:
-        return False, "El código ya existe"
+        return True, "✅ Empleado creado exitosamente"
+        
+    except sqlite3.IntegrityError as e:
+        if "UNIQUE constraint failed" in str(e):
+            return False, "❌ El código ya existe"
+        return False, f"❌ Error de integridad: {e}"
     except Exception as e:
-        return False, f"Error: {e}"
+        return False, f"❌ Error: {e}"
     finally:
         conn.close()
 
 
 def update_employee(empleado_id, codigo, nombre, cargo, area, telefono, email):
+    """Actualiza un empleado existente"""
     conn = get_connection()
-    c = conn.cursor()
+    if conn is None:
+        return False, "Error de conexión"
+        
     try:
+        c = conn.cursor()
         c.execute("""
         UPDATE empleados 
-        SET codigo=?, nombre=?, cargo=?, area=?, telefono=?, email=?
-        WHERE id=?
-        """, (codigo, nombre, cargo, area, telefono, email, empleado_id))
+        SET codigo = ?, nombre = ?, cargo = ?, area = ?, telefono = ?, email = ?
+        WHERE id = ?
+        """, (codigo.strip(), nombre.strip(), cargo.strip(), area.strip(), telefono.strip(), email.strip(), empleado_id))
+        
         conn.commit()
-        return True, "Empleado actualizado exitosamente"
-    except sqlite3.IntegrityError:
-        return False, "El código ya existe"
+        return True, "✅ Empleado actualizado exitosamente"
+        
+    except sqlite3.IntegrityError as e:
+        if "UNIQUE constraint failed" in str(e):
+            return False, "❌ El código ya existe"
+        return False, f"❌ Error de integridad: {e}"
     except Exception as e:
-        return False, f"Error: {e}"
+        return False, f"❌ Error: {e}"
     finally:
         conn.close()
 
 
 def delete_employee(empleado_id):
+    """Desactiva un empleado (soft delete)"""
     conn = get_connection()
-    c = conn.cursor()
+    if conn is None:
+        return False, "Error de conexión"
+        
     try:
-        c.execute("UPDATE empleados SET activo=0 WHERE id=?", (empleado_id,))
+        c = conn.cursor()
+        c.execute("UPDATE empleados SET activo = 0 WHERE id = ?", (empleado_id,))
         conn.commit()
-        return True, "Empleado desactivado exitosamente"
+        return True, "✅ Empleado desactivado exitosamente"
     except Exception as e:
-        return False, f"Error: {e}"
+        return False, f"❌ Error: {e}"
     finally:
         conn.close()
 
@@ -254,125 +349,250 @@ def delete_employee(empleado_id):
 # LOGIN
 # =============================================================================
 def show_login():
+    """Muestra la pantalla de login"""
     st.markdown("""
     <div class="main-header">
-        <h1>🔐 Droguería Restrepo</h1>
+        <h1>🔐 Sistema de Gestión - Droguería Restrepo</h1>
         <p>Inicio de sesión</p>
     </div>
     """, unsafe_allow_html=True)
 
-    col1, col2, col3 = st.columns([1,2,1])
+    col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         st.markdown('<div class="login-box">', unsafe_allow_html=True)
-        user = st.text_input("Usuario", value="admin")
-        pwd = st.text_input("Contraseña", type="password", value="admin123")
-        if st.button("Ingresar", use_container_width=True):
-            u = authenticate(user, pwd)
-            if u:
-                st.session_state.authenticated = True
-                st.session_state.user = u
-                st.rerun()
-            else:
-                st.error("Credenciales incorrectas")
+        
+        st.markdown("### 🔐 Iniciar Sesión")
+        
+        # Información de acceso predeterminado
+        with st.expander("ℹ️ Información de acceso"):
+            st.info("""
+            **Usuario:** admin  
+            **Contraseña:** admin123  
+            
+            Este es el usuario administrador predeterminado.
+            """)
+        
+        user = st.text_input("**Usuario**", value="admin", key="login_user")
+        pwd = st.text_input("**Contraseña**", type="password", value="admin123", key="login_pwd")
+        
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("🚪 **Ingresar**", use_container_width=True, type="primary"):
+                if not user or not pwd:
+                    st.error("Por favor ingrese usuario y contraseña")
+                else:
+                    with st.spinner("Verificando credenciales..."):
+                        u = authenticate(user, pwd)
+                        if u:
+                            st.session_state.authenticated = True
+                            st.session_state.user = u
+                            st.rerun()
+                        else:
+                            st.error("❌ Credenciales incorrectas")
+        
+        with col_btn2:
+            if st.button("🔄 **Reiniciar BD**", use_container_width=True, type="secondary"):
+                try:
+                    if os.path.exists(DB_NAME):
+                        os.remove(DB_NAME)
+                        st.success("Base de datos reiniciada. Recargue la página.")
+                    else:
+                        st.info("No existe base de datos previa.")
+                except Exception as e:
+                    st.error(f"Error: {e}")
+        
         st.markdown("</div>", unsafe_allow_html=True)
 
 # =============================================================================
 # APP PRINCIPAL
 # =============================================================================
 def main():
-    st.session_state.setdefault("authenticated", False)
-    st.session_state.setdefault("user", None)
-    st.session_state.setdefault("page", "inicio")
-    st.session_state.setdefault("edit_employee_id", None)
-
-    # Inicializar BD SIEMPRE
+    """Función principal de la aplicación"""
+    
+    # Inicializar estado de sesión
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+    if "user" not in st.session_state:
+        st.session_state.user = None
+    if "page" not in st.session_state:
+        st.session_state.page = "inicio"
+    if "edit_employee_id" not in st.session_state:
+        st.session_state.edit_employee_id = None
+    
+    # Inicializar base de datos SIEMPRE al inicio
+    st.info("🔧 Inicializando sistema...")
     if not check_database_ready():
-        initialize_database()
-
+        success = initialize_database()
+        if success:
+            st.success("✅ Base de datos inicializada correctamente")
+            st.rerun()
+        else:
+            st.error("❌ Error al inicializar la base de datos")
+            return
+    
+    # Mostrar login si no está autenticado
     if not st.session_state.authenticated:
         show_login()
         return
-
+    
+    # Obtener usuario actual
     user = st.session_state.user
-
+    
+    # =========================================================================
     # SIDEBAR
+    # =========================================================================
     with st.sidebar:
         st.markdown(f"### 👤 {user['nombre']}")
-        st.write(f"Rol: **{user['rol']}**")
-
-        if st.button("🏠 Inicio"):
+        st.markdown(f"**Rol:** {user['rol']}")
+        st.divider()
+        
+        # Navegación
+        st.markdown("### 📱 Navegación")
+        
+        if st.button("🏠 **Inicio**", use_container_width=True):
             st.session_state.page = "inicio"
             st.session_state.edit_employee_id = None
             st.rerun()
-
+        
         if has_permission(user, "manage_employees"):
-            if st.button("👥 Empleados"):
+            if st.button("👥 **Empleados**", use_container_width=True):
                 st.session_state.page = "empleados"
                 st.session_state.edit_employee_id = None
                 st.rerun()
-
-        if st.button("🚪 Cerrar sesión"):
+        
+        st.divider()
+        
+        if st.button("🚪 **Cerrar sesión**", use_container_width=True, type="secondary"):
             st.session_state.authenticated = False
             st.session_state.user = None
+            st.session_state.page = "inicio"
             st.session_state.edit_employee_id = None
             st.rerun()
-
-    # CONTENIDO
+    
+    # =========================================================================
+    # CONTENIDO PRINCIPAL
+    # =========================================================================
+    
+    # PÁGINA DE INICIO
     if st.session_state.page == "inicio":
         st.title("🏠 Panel Principal")
-        st.success("Sistema funcionando correctamente ✅")
         
+        # Mostrar métricas
         col1, col2, col3 = st.columns(3)
+        
         with col1:
-            st.metric("Usuarios activos", "1")
+            st.metric("👤 Usuarios activos", "1", "Sistema")
+        
         with col2:
-            conn = get_connection()
-            c = conn.cursor()
-            c.execute("SELECT COUNT(*) FROM empleados WHERE activo=1")
-            count = c.fetchone()[0]
-            conn.close()
-            st.metric("Empleados activos", count)
+            try:
+                conn = get_connection()
+                if conn:
+                    c = conn.cursor()
+                    c.execute("SELECT COUNT(*) FROM empleados WHERE activo = 1")
+                    count = c.fetchone()[0]
+                    conn.close()
+                    st.metric("👥 Empleados activos", count, "Registrados")
+                else:
+                    st.metric("👥 Empleados activos", "Error", "Conexión")
+            except:
+                st.metric("👥 Empleados activos", "N/A", "Error")
+        
         with col3:
-            st.metric("Sistema", "Operativo")
-
-    if st.session_state.page == "empleados":
+            st.metric("✅ Sistema", "Operativo", "Estable")
+        
+        st.divider()
+        
+        # Información del sistema
+        st.markdown("### 📊 Información del Sistema")
+        
+        info_col1, info_col2 = st.columns(2)
+        
+        with info_col1:
+            st.info("""
+            **Funcionalidades disponibles:**
+            - ✅ Gestión de usuarios
+            - ✅ Gestión de empleados
+            - ✅ Autenticación segura
+            - ✅ Base de datos SQLite
+            """)
+        
+        with info_col2:
+            st.success("""
+            **Acceso rápido:**
+            - 👤 Usuario: admin
+            - 🔐 Contraseña: admin123
+            - 👥 Empleados: Ver sección correspondiente
+            """)
+    
+    # PÁGINA DE EMPLEADOS
+    elif st.session_state.page == "empleados":
         st.title("👥 Gestión de Empleados")
-
-        # Pestañas para diferentes funcionalidades
+        
+        # Verificar permisos
+        if not has_permission(user, "manage_employees"):
+            st.error("❌ No tienes permisos para gestionar empleados")
+            return
+        
+        # Pestañas
         tab1, tab2, tab3 = st.tabs(["📋 Lista de Empleados", "➕ Nuevo Empleado", "✏️ Editar Empleado"])
         
+        # TAB 1: Lista de empleados
         with tab1:
+            st.subheader("📋 Empleados Registrados")
+            
             df = get_employees()
             
             if df.empty:
-                st.info("No hay empleados registrados. Agrega el primero en la pestaña 'Nuevo Empleado'.")
+                st.info("📭 No hay empleados registrados. Agrega el primero en la pestaña 'Nuevo Empleado'.")
             else:
-                # Mostrar solo empleados activos
+                # Filtrar solo activos
                 df_activos = df[df['activo'] == 1]
-                st.dataframe(df_activos, use_container_width=True, hide_index=True)
                 
-                # Opciones de edición/eliminación
-                st.subheader("Acciones")
-                col1, col2 = st.columns(2)
+                if df_activos.empty:
+                    st.warning("⚠️ Todos los empleados están desactivados.")
+                else:
+                    # Mostrar tabla
+                    st.dataframe(
+                        df_activos[['codigo', 'nombre', 'cargo', 'area', 'telefono', 'email', 'fecha_ingreso']],
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    
+                    # Estadísticas
+                    col_stat1, col_stat2, col_stat3 = st.columns(3)
+                    with col_stat1:
+                        st.metric("Total empleados", len(df))
+                    with col_stat2:
+                        st.metric("Activos", len(df_activos))
+                    with col_stat3:
+                        st.metric("Inactivos", len(df) - len(df_activos))
                 
-                with col1:
-                    empleados_list = df_activos[['id', 'nombre', 'codigo']].to_dict('records')
-                    if empleados_list:
+                # Opciones de acción
+                st.subheader("⚙️ Acciones")
+                
+                if not df_activos.empty:
+                    # Seleccionar empleado para acciones
+                    empleados_opciones = df_activos[['id', 'codigo', 'nombre']].to_dict('records')
+                    
+                    col_act1, col_act2 = st.columns(2)
+                    
+                    with col_act1:
                         empleado_seleccionado = st.selectbox(
-                            "Seleccionar empleado para editar",
-                            options=empleados_list,
-                            format_func=lambda x: f"{x['codigo']} - {x['nombre']}"
+                            "Seleccionar empleado:",
+                            options=empleados_opciones,
+                            format_func=lambda x: f"{x['codigo']} - {x['nombre']}",
+                            key="select_empleado_edit"
                         )
                         
-                        if empleado_seleccionado and st.button("✏️ Editar empleado"):
+                        if empleado_seleccionado and st.button("✏️ **Editar empleado**", use_container_width=True):
                             st.session_state.edit_employee_id = empleado_seleccionado['id']
                             st.rerun()
-                
-                with col2:
-                    if empleados_list and st.button("🗑️ Desactivar empleado", type="secondary"):
-                        empleado_seleccionado = empleados_list[0] if empleados_list else None
-                        if empleado_seleccionado:
-                            if st.warning(f"¿Estás seguro de desactivar a {empleado_seleccionado['nombre']}?"):
+                    
+                    with col_act2:
+                        if empleado_seleccionado and st.button("🗑️ **Desactivar empleado**", 
+                                                             use_container_width=True, 
+                                                             type="secondary"):
+                            with st.spinner("Desactivando..."):
                                 success, message = delete_employee(empleado_seleccionado['id'])
                                 if success:
                                     st.success(message)
@@ -380,79 +600,107 @@ def main():
                                 else:
                                     st.error(message)
         
+        # TAB 2: Nuevo empleado
         with tab2:
-            st.subheader("➕ Nuevo empleado")
+            st.subheader("➕ Registrar Nuevo Empleado")
             
-            with st.form("nuevo_empleado_form"):
-                codigo = st.text_input("Código *", placeholder="Ej: EMP001")
-                nombre = st.text_input("Nombre completo *", placeholder="Ej: Juan Pérez")
-                cargo = st.text_input("Cargo *", placeholder="Ej: Vendedor")
-                area = st.text_input("Área/Dpto *", placeholder="Ej: Ventas")
-                telefono = st.text_input("Teléfono", placeholder="Ej: 3001234567")
-                email = st.text_input("Email", placeholder="Ej: empleado@empresa.com")
+            with st.form("form_nuevo_empleado", clear_on_submit=True):
+                col_f1, col_f2 = st.columns(2)
                 
-                submitted = st.form_submit_button("✅ Guardar empleado")
+                with col_f1:
+                    codigo = st.text_input("Código *", placeholder="EMP001", max_chars=20)
+                    nombre = st.text_input("Nombre completo *", placeholder="Juan Pérez", max_chars=100)
+                    cargo = st.text_input("Cargo *", placeholder="Vendedor", max_chars=50)
+                
+                with col_f2:
+                    area = st.text_input("Área/Departamento *", placeholder="Ventas", max_chars=50)
+                    telefono = st.text_input("Teléfono", placeholder="3001234567", max_chars=15)
+                    email = st.text_input("Email", placeholder="empleado@empresa.com", max_chars=100)
+                
+                st.markdown("(*) Campos obligatorios")
+                
+                submitted = st.form_submit_button("💾 **Guardar Empleado**", type="primary", use_container_width=True)
                 
                 if submitted:
                     if not all([codigo, nombre, cargo, area]):
-                        st.error("Por favor complete todos los campos obligatorios (*)")
+                        st.error("❌ Por favor complete todos los campos obligatorios (*)")
                     else:
-                        success, message = create_employee(codigo, nombre, cargo, area, telefono, email)
-                        if success:
-                            st.success(message)
-                            st.rerun()
-                        else:
-                            st.error(message)
+                        with st.spinner("Guardando empleado..."):
+                            success, message = create_employee(codigo, nombre, cargo, area, telefono, email)
+                            if success:
+                                st.success(message)
+                                st.rerun()
+                            else:
+                                st.error(message)
         
+        # TAB 3: Editar empleado
         with tab3:
-            st.subheader("✏️ Editar empleado")
+            st.subheader("✏️ Editar Empleado")
             
             if st.session_state.edit_employee_id:
-                # Obtener datos del empleado a editar
+                # Obtener datos del empleado
                 conn = get_connection()
-                c = conn.cursor()
-                c.execute("SELECT * FROM empleados WHERE id=?", (st.session_state.edit_employee_id,))
-                empleado = c.fetchone()
-                conn.close()
-                
-                if empleado:
-                    with st.form("editar_empleado_form"):
-                        codigo = st.text_input("Código *", value=empleado['codigo'])
-                        nombre = st.text_input("Nombre completo *", value=empleado['nombre'])
-                        cargo = st.text_input("Cargo *", value=empleado['cargo'])
-                        area = st.text_input("Área/Dpto *", value=empleado['area'])
-                        telefono = st.text_input("Teléfono", value=empleado['telefono'] or "")
-                        email = st.text_input("Email", value=empleado['email'] or "")
+                if conn:
+                    try:
+                        c = conn.cursor()
+                        c.execute("SELECT * FROM empleados WHERE id = ?", (st.session_state.edit_employee_id,))
+                        empleado = c.fetchone()
                         
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            submitted = st.form_submit_button("💾 Guardar cambios")
-                        with col2:
-                            cancel = st.form_submit_button("❌ Cancelar", type="secondary")
-                        
-                        if cancel:
-                            st.session_state.edit_employee_id = None
-                            st.rerun()
-                        
-                        if submitted:
-                            if not all([codigo, nombre, cargo, area]):
-                                st.error("Por favor complete todos los campos obligatorios (*)")
-                            else:
-                                success, message = update_employee(
-                                    st.session_state.edit_employee_id,
-                                    codigo, nombre, cargo, area, telefono, email
-                                )
-                                if success:
-                                    st.success(message)
+                        if empleado:
+                            with st.form("form_editar_empleado"):
+                                col_e1, col_e2 = st.columns(2)
+                                
+                                with col_e1:
+                                    codigo = st.text_input("Código *", value=empleado['codigo'], max_chars=20)
+                                    nombre = st.text_input("Nombre completo *", value=empleado['nombre'], max_chars=100)
+                                    cargo = st.text_input("Cargo *", value=empleado['cargo'], max_chars=50)
+                                
+                                with col_e2:
+                                    area = st.text_input("Área/Departamento *", value=empleado['area'], max_chars=50)
+                                    telefono = st.text_input("Teléfono", value=empleado['telefono'] or "", max_chars=15)
+                                    email = st.text_input("Email", value=empleado['email'] or "", max_chars=100)
+                                
+                                st.markdown("(*) Campos obligatorios")
+                                
+                                col_btn1, col_btn2, col_btn3 = st.columns(3)
+                                
+                                with col_btn1:
+                                    submitted = st.form_submit_button("💾 **Guardar Cambios**", type="primary", use_container_width=True)
+                                with col_btn2:
+                                    cancel = st.form_submit_button("❌ **Cancelar**", type="secondary", use_container_width=True)
+                                
+                                if cancel:
                                     st.session_state.edit_employee_id = None
                                     st.rerun()
-                                else:
-                                    st.error(message)
+                                
+                                if submitted:
+                                    if not all([codigo, nombre, cargo, area]):
+                                        st.error("❌ Por favor complete todos los campos obligatorios (*)")
+                                    else:
+                                        with st.spinner("Actualizando empleado..."):
+                                            success, message = update_employee(
+                                                st.session_state.edit_employee_id,
+                                                codigo, nombre, cargo, area, telefono, email
+                                            )
+                                            if success:
+                                                st.success(message)
+                                                st.session_state.edit_employee_id = None
+                                                st.rerun()
+                                            else:
+                                                st.error(message)
+                        else:
+                            st.warning("⚠️ Empleado no encontrado")
+                            st.session_state.edit_employee_id = None
+                            
+                    except Exception as e:
+                        st.error(f"❌ Error: {e}")
+                    finally:
+                        conn.close()
                 else:
-                    st.warning("Empleado no encontrado")
+                    st.error("❌ Error de conexión a la base de datos")
                     st.session_state.edit_employee_id = None
             else:
-                st.info("Selecciona un empleado para editar en la pestaña 'Lista de Empleados'")
+                st.info("ℹ️ Selecciona un empleado para editar en la pestaña 'Lista de Empleados'")
 
 # =============================================================================
 # EJECUCIÓN
