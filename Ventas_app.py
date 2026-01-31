@@ -72,72 +72,91 @@ def hash_password(password, salt=None):
     return h, salt
 
 
-def check_and_fix_database():
-    """Verifica y repara la estructura de la base de datos"""
+def verify_database_structure():
+    """Verifica que todas las tablas y columnas existan"""
     try:
         conn = get_connection()
         if not conn:
-            return False
-            
+            return False, "No se pudo conectar a la base de datos"
+        
         c = conn.cursor()
         
-        # Verificar si la tabla empleados existe
+        # Verificar tabla roles
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='roles'")
+        if not c.fetchone():
+            conn.close()
+            return False, "Tabla 'roles' no existe"
+        
+        # Verificar tabla usuarios
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'")
+        if not c.fetchone():
+            conn.close()
+            return False, "Tabla 'usuarios' no existe"
+        
+        # Verificar tabla empleados
         c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='empleados'")
         if not c.fetchone():
-            # Tabla no existe, hay que crear todas las tablas desde cero
             conn.close()
-            return False
+            return False, "Tabla 'empleados' no existe"
         
-        # Verificar si la tabla empleados tiene la columna 'codigo'
+        # Verificar columnas de usuarios
+        c.execute("PRAGMA table_info(usuarios)")
+        user_columns = [col[1] for col in c.fetchall()]
+        required_user_columns = ['id', 'username', 'nombre', 'password_hash', 'salt', 'rol_id', 'activo']
+        
+        missing_user_columns = set(required_user_columns) - set(user_columns)
+        if missing_user_columns:
+            conn.close()
+            return False, f"Faltan columnas en 'usuarios': {missing_user_columns}"
+        
+        # Verificar columnas de empleados
         c.execute("PRAGMA table_info(empleados)")
-        columns = c.fetchall()
-        column_names = [col[1] for col in columns]
+        emp_columns = [col[1] for col in c.fetchall()]
+        required_emp_columns = ['id', 'codigo', 'nombre', 'cargo', 'area', 'telefono', 'email', 'activo', 'fecha_ingreso']
+        
+        missing_emp_columns = set(required_emp_columns) - set(emp_columns)
+        if missing_emp_columns:
+            conn.close()
+            return False, f"Faltan columnas en 'empleados': {missing_emp_columns}"
         
         conn.close()
-        
-        # Lista de columnas requeridas para la tabla empleados
-        required_columns = ['id', 'codigo', 'nombre', 'cargo', 'area', 'telefono', 'email', 'activo', 'fecha_ingreso']
-        
-        # Verificar si faltan columnas
-        missing_columns = set(required_columns) - set(column_names)
-        
-        if missing_columns:
-            st.warning(f"⚠️ Faltan columnas en la tabla empleados: {missing_columns}")
-            return False
-            
-        return True
+        return True, "Estructura de base de datos correcta"
         
     except Exception as e:
-        st.error(f"Error verificando base de datos: {str(e)}")
-        return False
+        return False, f"Error verificando estructura: {str(e)}"
 
 
-def initialize_database():
-    """Inicializa la base de datos desde cero"""
+def create_database_from_scratch():
+    """Crea la base de datos desde cero con la estructura correcta"""
     try:
-        # Eliminar base de datos existente si hay problemas
+        # Eliminar base de datos existente
         if os.path.exists(DB_NAME):
-            try:
-                os.remove(DB_NAME)
-                time.sleep(0.5)
-            except:
-                pass
+            os.remove(DB_NAME)
+            time.sleep(0.5)
         
         conn = sqlite3.connect(DB_NAME)
         c = conn.cursor()
         
-        # Tabla de roles
+        # Tabla roles - versión simplificada
         c.execute('''
-        CREATE TABLE IF NOT EXISTS roles (
+        CREATE TABLE roles (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre TEXT UNIQUE NOT NULL,
             permisos TEXT
         )
         ''')
         
-        # Tabla de usuarios
+        # Insertar roles básicos
+        roles = [
+            ('admin', 'all'),
+            ('gerente', 'manage_employees'),
+            ('vendedor', 'view_own_data')
+        ]
+        c.executemany('INSERT INTO roles (nombre, permisos) VALUES (?, ?)', roles)
+        
+        # Tabla usuarios - versión simplificada
         c.execute('''
-        CREATE TABLE IF NOT EXISTS usuarios (
+        CREATE TABLE usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             nombre TEXT NOT NULL,
@@ -149,9 +168,17 @@ def initialize_database():
         )
         ''')
         
-        # Tabla de empleados - Asegurando que todas las columnas estén presentes
+        # Crear usuario admin
+        admin_password = "admin123"
+        password_hash, salt = hash_password(admin_password)
         c.execute('''
-        CREATE TABLE IF NOT EXISTS empleados (
+        INSERT INTO usuarios (username, nombre, password_hash, salt, rol_id)
+        VALUES (?, ?, ?, ?, ?)
+        ''', ('admin', 'Administrador', password_hash, salt, 1))
+        
+        # Tabla empleados - versión simplificada
+        c.execute('''
+        CREATE TABLE empleados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             codigo TEXT UNIQUE NOT NULL,
             nombre TEXT NOT NULL,
@@ -160,161 +187,97 @@ def initialize_database():
             telefono TEXT,
             email TEXT,
             activo INTEGER DEFAULT 1,
-            fecha_ingreso DATE DEFAULT (DATE('now'))
+            fecha_ingreso DATE DEFAULT CURRENT_DATE
         )
         ''')
         
-        # Insertar roles por defecto
-        roles = [
-            ('admin', 'all'),
-            ('gerente', 'manage_employees,view_reports'),
-            ('vendedor', 'view_own_data,make_sales')
-        ]
-        
-        for rol in roles:
-            try:
-                c.execute('INSERT OR IGNORE INTO roles (nombre, permisos) VALUES (?, ?)', rol)
-            except:
-                pass
-        
-        # Obtener ID del rol admin
-        c.execute('SELECT id FROM roles WHERE nombre = "admin"')
-        admin_rol_id = c.fetchone()
-        
-        if admin_rol_id:
-            admin_rol_id = admin_rol_id[0]
-            
-            # Crear usuario admin por defecto
-            password = "admin123"
-            password_hash, salt = hash_password(password)
-            
-            admin_user = ('admin', 'Administrador del Sistema', password_hash, salt, admin_rol_id)
-            
-            try:
-                c.execute('''
-                INSERT OR IGNORE INTO usuarios 
-                (username, nombre, password_hash, salt, rol_id) 
-                VALUES (?, ?, ?, ?, ?)
-                ''', admin_user)
-            except:
-                pass
-        
         # Insertar empleados de ejemplo
-        empleados_ejemplo = [
+        empleados = [
             ('EMP001', 'Juan Pérez', 'Vendedor', 'Ventas', '3001234567', 'juan@empresa.com'),
             ('EMP002', 'María Gómez', 'Gerente', 'Administración', '3109876543', 'maria@empresa.com'),
-            ('EMP003', 'Carlos López', 'Farmacéutico', 'Farmacia', '3204567890', 'carlos@empresa.com'),
-            ('EMP004', 'Ana Rodríguez', 'Cajero', 'Caja', '3157890123', 'ana@empresa.com'),
-            ('EMP005', 'Pedro Martínez', 'Almacenista', 'Almacén', '3184567890', 'pedro@empresa.com')
+            ('EMP003', 'Carlos López', 'Farmacéutico', 'Farmacia', '3204567890', 'carlos@empresa.com')
         ]
-        
-        for emp in empleados_ejemplo:
-            try:
-                c.execute('''
-                INSERT OR IGNORE INTO empleados 
-                (codigo, nombre, cargo, area, telefono, email) 
-                VALUES (?, ?, ?, ?, ?, ?)
-                ''', emp)
-            except Exception as e:
-                print(f"Error insertando empleado {emp[0]}: {e}")
+        c.executemany('''
+        INSERT INTO empleados (codigo, nombre, cargo, area, telefono, email)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ''', empleados)
         
         conn.commit()
         conn.close()
         
-        return True
+        return True, "Base de datos creada exitosamente"
         
     except Exception as e:
-        st.error(f"Error crítico al inicializar la base de datos: {str(e)}")
-        return False
-
-
-def fix_database_structure():
-    """Intenta reparar la estructura de la base de datos sin borrar datos"""
-    try:
-        conn = get_connection()
-        if not conn:
-            return False
-            
-        c = conn.cursor()
-        
-        # Verificar estructura de cada tabla y corregir si es necesario
-        c.execute("PRAGMA table_info(empleados)")
-        empleados_columns = c.fetchall()
-        empleados_column_names = [col[1] for col in empleados_columns]
-        
-        # Si falta la columna 'codigo', intentar agregarla
-        if 'codigo' not in empleados_column_names:
-            try:
-                c.execute("ALTER TABLE empleados ADD COLUMN codigo TEXT UNIQUE")
-                st.info("✅ Columna 'codigo' agregada a tabla empleados")
-            except:
-                # Si no se puede agregar, mejor recrear la tabla
-                conn.close()
-                return False
-        
-        # Verificar otras columnas necesarias
-        required_columns = ['nombre', 'cargo', 'area', 'telefono', 'email', 'activo', 'fecha_ingreso']
-        
-        for column in required_columns:
-            if column not in empleados_column_names:
-                st.warning(f"Columna '{column}' faltante en empleados")
-                return False
-        
-        conn.commit()
-        conn.close()
-        return True
-        
-    except Exception as e:
-        st.error(f"Error reparando estructura de BD: {str(e)}")
-        return False
+        return False, f"Error creando base de datos: {str(e)}"
 
 
 def force_database_initialization():
     """Fuerza la inicialización completa de la base de datos"""
-    with st.spinner("🔄 Inicializando base de datos desde cero..."):
-        success = initialize_database()
+    with st.spinner("🔄 Creando base de datos desde cero..."):
+        success, message = create_database_from_scratch()
         if success:
-            st.success("✅ Base de datos inicializada correctamente!")
+            st.success(f"✅ {message}")
             time.sleep(2)
             st.rerun()
         else:
-            st.error("❌ Error al inicializar la base de datos")
-            return False
-    return success
+            st.error(f"❌ {message}")
+        return success
 
 # =============================================================================
-# AUTENTICACIÓN
+# AUTENTICACIÓN - VERSIÓN SIMPLIFICADA Y ROBUSTA
 # =============================================================================
-def authenticate(username, password):
-    """Autentica un usuario"""
+def authenticate_simple(username, password):
+    """Autentica un usuario de forma segura y simple"""
     conn = get_connection()
     if not conn:
         return None
     
     try:
         c = conn.cursor()
-        c.execute('''
-        SELECT u.*, r.nombre as rol_nombre, r.permisos 
-        FROM usuarios u 
-        JOIN roles r ON u.rol_id = r.id 
-        WHERE u.username = ? AND u.activo = 1
-        ''', (username,))
         
+        # Primero verificar si el usuario existe
+        c.execute('SELECT * FROM usuarios WHERE username = ?', (username,))
         user_data = c.fetchone()
         
-        if user_data:
-            # Verificar contraseña
-            stored_hash = user_data['password_hash']
-            salt = user_data['salt']
-            input_hash, _ = hash_password(password, salt)
+        if not user_data:
+            return None
+        
+        # Convertir a diccionario de forma segura
+        user_dict = {}
+        if isinstance(user_data, sqlite3.Row):
+            # Si es un Row, convertir a dict
+            user_dict = dict(user_data)
+        else:
+            # Si es una tupla, crear dict manualmente
+            columns = ['id', 'username', 'nombre', 'password_hash', 'salt', 'rol_id', 'activo']
+            for i, col in enumerate(columns):
+                if i < len(user_data):
+                    user_dict[col] = user_data[i]
+        
+        # Verificar contraseña
+        stored_hash = user_dict.get('password_hash')
+        salt = user_dict.get('salt')
+        
+        if not stored_hash or not salt:
+            return None
+        
+        input_hash, _ = hash_password(password, salt)
+        
+        if input_hash == stored_hash:
+            # Obtener información del rol
+            c.execute('SELECT nombre, permisos FROM roles WHERE id = ?', (user_dict['rol_id'],))
+            rol_data = c.fetchone()
             
-            if input_hash == stored_hash:
+            if rol_data:
+                rol_nombre = rol_data[0] if isinstance(rol_data, tuple) else rol_data['nombre']
+                permisos = rol_data[1] if isinstance(rol_data, tuple) else rol_data['permisos']
+                
                 return {
-                    'id': user_data['id'],
-                    'username': user_data['username'],
-                    'nombre': user_data['nombre'],
-                    'rol': user_data['rol_nombre'],
-                    'permisos': user_data['permisos']
+                    'id': user_dict['id'],
+                    'username': user_dict['username'],
+                    'nombre': user_dict['nombre'],
+                    'rol': rol_nombre,
+                    'permisos': permisos
                 }
         
         return None
@@ -349,7 +312,7 @@ def get_employees():
     try:
         query = '''
         SELECT id, codigo, nombre, cargo, area, telefono, email, activo,
-               DATE(fecha_ingreso) as fecha_ingreso
+               fecha_ingreso
         FROM empleados 
         ORDER BY nombre
         '''
@@ -439,8 +402,17 @@ def get_employee_by_id(empleado_id):
     try:
         c = conn.cursor()
         c.execute('SELECT * FROM empleados WHERE id = ?', (empleado_id,))
-        empleado = c.fetchone()
-        return dict(empleado) if empleado else None
+        row = c.fetchone()
+        
+        if row:
+            # Convertir a diccionario de forma segura
+            if isinstance(row, sqlite3.Row):
+                return dict(row)
+            else:
+                columns = ['id', 'codigo', 'nombre', 'cargo', 'area', 'telefono', 'email', 'activo', 'fecha_ingreso']
+                return {columns[i]: row[i] for i in range(len(columns)) if i < len(row)}
+        return None
+        
     except Exception as e:
         st.error(f"Error obteniendo empleado: {str(e)}")
         return None
@@ -455,7 +427,7 @@ def show_login():
     st.markdown("""
     <div class="main-header">
         <h1>🏥 Sistema de Gestión - Droguería Restrepo</h1>
-        <p>Control de Inventario y Ventas</p>
+        <p>Sistema de Gestión de Empleados</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -467,44 +439,45 @@ def show_login():
         st.markdown("### 🔐 Inicio de Sesión")
         
         # Información de acceso
-        with st.expander("📋 Credenciales de acceso"):
+        with st.expander("📋 Credenciales de acceso por defecto"):
             st.info("""
             **Usuario:** admin  
             **Contraseña:** admin123
             
-            *Nota: Esta es la cuenta de administrador por defecto.*
+            *Estas credenciales se crean automáticamente al inicializar el sistema.*
             """)
         
         # Formulario de login
         username = st.text_input("👤 Usuario", value="admin", key="login_username")
         password = st.text_input("🔒 Contraseña", type="password", value="admin123", key="login_password")
         
-        col_btn1, col_btn2 = st.columns(2)
-        
-        with col_btn1:
-            if st.button("🚀 **Iniciar Sesión**", use_container_width=True, type="primary"):
-                if username and password:
-                    with st.spinner("Verificando credenciales..."):
-                        user = authenticate(username, password)
-                        if user:
-                            st.session_state.authenticated = True
-                            st.session_state.user = user
-                            st.session_state.page = "inicio"
-                            st.success(f"✅ Bienvenido, {user['nombre']}!")
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.error("❌ Usuario o contraseña incorrectos")
-                else:
-                    st.warning("⚠️ Por favor ingrese usuario y contraseña")
-        
-        with col_btn2:
-            if st.button("🔄 **Reiniciar Sistema**", use_container_width=True, type="secondary"):
-                st.warning("⚠️ Esta acción eliminará todos los datos y reiniciará el sistema.")
-                if st.checkbox("Confirmar reinicio", key="confirm_reset"):
-                    if force_database_initialization():
-                        st.success("✅ Sistema reiniciado correctamente")
+        if st.button("🚀 **Iniciar Sesión**", use_container_width=True, type="primary"):
+            if username and password:
+                with st.spinner("Verificando credenciales..."):
+                    user = authenticate_simple(username, password)
+                    if user:
+                        st.session_state.authenticated = True
+                        st.session_state.user = user
+                        st.session_state.page = "inicio"
+                        st.success(f"✅ Bienvenido, {user['nombre']}!")
+                        time.sleep(1)
                         st.rerun()
+                    else:
+                        st.error("❌ Usuario o contraseña incorrectos")
+            else:
+                st.warning("⚠️ Por favor ingrese usuario y contraseña")
+        
+        st.markdown("---")
+        
+        # Opción para crear base de datos si no existe
+        if st.button("🆕 **Crear Base de Datos desde Cero**", use_container_width=True, type="secondary"):
+            st.warning("⚠️ Esta acción creará una nueva base de datos con datos de ejemplo.")
+            if st.checkbox("Confirmar creación", key="confirm_create"):
+                if force_database_initialization():
+                    st.success("✅ Base de datos creada exitosamente")
+                    st.info("Ahora puede iniciar sesión con usuario: admin, contraseña: admin123")
+                else:
+                    st.error("❌ Error al crear la base de datos")
         
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -622,11 +595,6 @@ def main_app():
             - Contraseñas encriptadas
             - Sesiones seguras
             - Control de acceso
-            
-            📊 **Próximamente**
-            - Gestión de ventas
-            - Control de inventario
-            - Reportes y estadísticas
             """)
     
     # PÁGINA DE GESTIÓN DE EMPLEADOS
@@ -636,30 +604,6 @@ def main_app():
             return
         
         st.title("👥 Gestión de Empleados")
-        
-        # Verificar estructura de la tabla empleados antes de continuar
-        try:
-            conn = get_connection()
-            c = conn.cursor()
-            c.execute("PRAGMA table_info(empleados)")
-            columns = c.fetchall()
-            column_names = [col[1] for col in columns]
-            conn.close()
-            
-            # Verificar columna 'codigo'
-            if 'codigo' not in column_names:
-                st.error("❌ Error crítico: La tabla 'empleados' no tiene la columna 'codigo'")
-                st.warning("⚠️ Es necesario reiniciar la base de datos")
-                if st.button("🔄 **Reiniciar Base de Datos Ahora**", type="primary"):
-                    if force_database_initialization():
-                        st.success("✅ Base de datos reiniciada. Recarga la página.")
-                    else:
-                        st.error("❌ Error al reiniciar la base de datos")
-                return
-                
-        except Exception as e:
-            st.error(f"❌ Error verificando estructura de la base de datos: {str(e)}")
-            return
         
         # Pestañas para diferentes funcionalidades
         tab_lista, tab_nuevo, tab_editar = st.tabs([
@@ -685,33 +629,14 @@ def main_app():
                 if not df_activos.empty:
                     st.markdown(f"**Empleados activos ({len(df_activos)}):**")
                     
-                    # Formatear dataframe para mostrar
-                    display_df = df_activos[['codigo', 'nombre', 'cargo', 'area', 'telefono', 'email']].copy()
+                    # Mostrar tabla
                     st.dataframe(
-                        display_df,
+                        df_activos[['codigo', 'nombre', 'cargo', 'area', 'telefono', 'email']],
                         use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            'codigo': 'Código',
-                            'nombre': 'Nombre',
-                            'cargo': 'Cargo',
-                            'area': 'Área',
-                            'telefono': 'Teléfono',
-                            'email': 'Email'
-                        }
+                        hide_index=True
                     )
                 else:
                     st.warning("⚠️ No hay empleados activos en el sistema.")
-                
-                # Mostrar estadísticas
-                col_stat1, col_stat2, col_stat3 = st.columns(3)
-                with col_stat1:
-                    st.metric("Total", len(df_empleados))
-                with col_stat2:
-                    st.metric("Activos", len(df_activos))
-                with col_stat3:
-                    df_inactivos = df_empleados[df_empleados['activo'] == 0]
-                    st.metric("Inactivos", len(df_inactivos))
                 
                 # Opciones de acción
                 if not df_activos.empty:
@@ -772,19 +697,16 @@ def main_app():
                     codigo = st.text_input(
                         "🔢 **Código** *", 
                         placeholder="Ej: EMP006",
-                        help="Código único del empleado",
                         max_chars=20
                     )
                     nombre = st.text_input(
                         "👤 **Nombre Completo** *", 
                         placeholder="Ej: Laura Sánchez",
-                        help="Nombre completo del empleado",
                         max_chars=100
                     )
                     cargo = st.text_input(
                         "💼 **Cargo** *", 
                         placeholder="Ej: Auxiliar de Farmacia",
-                        help="Cargo o posición del empleado",
                         max_chars=50
                     )
                 
@@ -792,19 +714,16 @@ def main_app():
                     area = st.text_input(
                         "🏢 **Área/Departamento** *", 
                         placeholder="Ej: Farmacia",
-                        help="Área o departamento donde trabaja",
                         max_chars=50
                     )
                     telefono = st.text_input(
                         "📱 **Teléfono**", 
                         placeholder="Ej: 3001234567",
-                        help="Número de contacto",
                         max_chars=15
                     )
                     email = st.text_input(
                         "📧 **Email**", 
                         placeholder="Ej: laura@empresa.com",
-                        help="Correo electrónico",
                         max_chars=100
                     )
                 
@@ -886,7 +805,7 @@ def main_app():
                         
                         st.markdown("(*) Campos obligatorios")
                         
-                        col_btn1, col_btn2, col_btn3 = st.columns(3)
+                        col_btn1, col_btn2 = st.columns(2)
                         
                         with col_btn1:
                             submitted = st.form_submit_button(
@@ -947,49 +866,6 @@ def main():
         st.session_state.page = "inicio"
     if 'edit_employee_id' not in st.session_state:
         st.session_state.edit_employee_id = None
-    
-    # Verificar estructura de la base de datos
-    if not check_and_fix_database():
-        st.warning("⚠️ La base de datos necesita ser inicializada o reparada...")
-        
-        col_init1, col_init2, col_init3 = st.columns([1, 2, 1])
-        with col_init2:
-            st.markdown('<div class="login-box">', unsafe_allow_html=True)
-            st.markdown("### 🔧 Configuración Inicial del Sistema")
-            st.error("❌ **Problema detectado:** La tabla 'empleados' no tiene la estructura correcta.")
-            st.info("""
-            **Se necesita reinicializar la base de datos.**
-            
-            **Esto creará:**
-            - ✅ Tablas de usuarios, roles y empleados
-            - ✅ Usuario administrador (admin/admin123)
-            - ✅ Empleados de ejemplo
-            - ✅ Estructura correcta con columna 'codigo'
-            
-            **Nota:** Si había datos previos, se perderán.
-            """)
-            
-            if st.button("🔄 **Inicializar Base de Datos**", use_container_width=True, type="primary"):
-                if force_database_initialization():
-                    st.success("✅ Base de datos inicializada correctamente!")
-                    st.info("Por favor, recarga la página para continuar.")
-                else:
-                    st.error("❌ Error al inicializar la base de datos")
-            
-            # Intentar reparar sin borrar datos
-            st.markdown("---")
-            st.markdown("### 🔧 Intentar reparar sin perder datos")
-            st.warning("Esta opción intentará agregar columnas faltantes sin borrar datos existentes.")
-            
-            if st.button("🔧 **Intentar Reparar Estructura**", use_container_width=True, type="secondary"):
-                if fix_database_structure():
-                    st.success("✅ Estructura reparada correctamente!")
-                    st.rerun()
-                else:
-                    st.error("❌ No se pudo reparar la estructura. Se necesita reinicialización completa.")
-            
-            st.markdown("</div>", unsafe_allow_html=True)
-        return
     
     # Mostrar login si no está autenticado
     if not st.session_state.authenticated:
