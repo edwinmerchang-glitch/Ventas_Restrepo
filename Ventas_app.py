@@ -47,6 +47,13 @@ st.markdown("""
 .stButton > button {
     width: 100%;
 }
+.success-card {
+    background-color: #d4edda;
+    color: #155724;
+    padding: 15px;
+    border-radius: 8px;
+    margin: 10px 0;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -99,6 +106,18 @@ def verify_database_structure():
             conn.close()
             return False, "Tabla 'empleados' no existe"
         
+        # Verificar tabla productos
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='productos'")
+        if not c.fetchone():
+            conn.close()
+            return False, "Tabla 'productos' no existe"
+        
+        # Verificar tabla ventas
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='ventas'")
+        if not c.fetchone():
+            conn.close()
+            return False, "Tabla 'ventas' no existe"
+        
         # Verificar columnas de usuarios
         c.execute("PRAGMA table_info(usuarios)")
         user_columns = [col[1] for col in c.fetchall()]
@@ -149,8 +168,8 @@ def create_database_from_scratch():
         # Insertar roles básicos
         roles = [
             ('admin', 'all'),
-            ('gerente', 'manage_employees'),
-            ('vendedor', 'view_own_data')
+            ('gerente', 'manage_employees,view_sales'),
+            ('vendedor', 'register_sales,view_own_data')
         ]
         c.executemany('INSERT INTO roles (nombre, permisos) VALUES (?, ?)', roles)
         
@@ -175,6 +194,14 @@ def create_database_from_scratch():
         INSERT INTO usuarios (username, nombre, password_hash, salt, rol_id)
         VALUES (?, ?, ?, ?, ?)
         ''', ('admin', 'Administrador', password_hash, salt, 1))
+        
+        # Crear usuario vendedor
+        vendedor_password = "vendedor123"
+        password_hash_v, salt_v = hash_password(vendedor_password)
+        c.execute('''
+        INSERT INTO usuarios (username, nombre, password_hash, salt, rol_id)
+        VALUES (?, ?, ?, ?, ?)
+        ''', ('vendedor', 'Vendedor Ejemplo', password_hash_v, salt_v, 3))
         
         # Tabla empleados - versión simplificada
         c.execute('''
@@ -201,6 +228,70 @@ def create_database_from_scratch():
         INSERT INTO empleados (codigo, nombre, cargo, area, telefono, email)
         VALUES (?, ?, ?, ?, ?, ?)
         ''', empleados)
+        
+        # Tabla productos
+        c.execute('''
+        CREATE TABLE productos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo TEXT UNIQUE NOT NULL,
+            nombre TEXT NOT NULL,
+            descripcion TEXT,
+            categoria TEXT NOT NULL,
+            precio_unitario REAL NOT NULL,
+            stock INTEGER DEFAULT 0,
+            unidad_medida TEXT DEFAULT 'unidades',
+            activo INTEGER DEFAULT 1
+        )
+        ''')
+        
+        # Insertar productos de ejemplo
+        productos = [
+            ('PROD001', 'Acetaminofén 500mg', 'Analgésico y antipirético', 'Medicamentos', 12000, 100, 'unidades'),
+            ('PROD002', 'Amoxicilina 500mg', 'Antibiótico', 'Medicamentos', 25000, 50, 'unidades'),
+            ('PROD003', 'Jabón Antibacterial', 'Jabón para manos', 'Aseo', 8500, 200, 'unidades'),
+            ('PROD004', 'Alcohol Antiséptico', 'Alcohol en gel 250ml', 'Aseo', 15000, 150, 'unidades'),
+            ('PROD005', 'Vitamina C 1000mg', 'Suplemento vitamínico', 'Suplementos', 18000, 80, 'unidades'),
+            ('PROD006', 'Curitas', 'Caja de 100 unidades', 'Primeros Auxilios', 9500, 300, 'cajas'),
+            ('PROD007', 'Termómetro Digital', 'Termómetro clínico', 'Instrumental', 45000, 30, 'unidades'),
+            ('PROD008', 'Jeringa 3ml', 'Jeringa estéril', 'Insumos Médicos', 3500, 500, 'unidades'),
+            ('PROD009', 'Guantes de Látex', 'Caja de 100 unidades', 'Insumos Médicos', 32000, 40, 'cajas'),
+            ('PROD010', 'Mascarilla KN95', 'Mascarilla de protección', 'Protección', 8500, 250, 'unidades')
+        ]
+        
+        c.executemany('''
+        INSERT INTO productos (codigo, nombre, descripcion, categoria, precio_unitario, stock, unidad_medida)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', productos)
+        
+        # Tabla ventas
+        c.execute('''
+        CREATE TABLE ventas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            producto_id INTEGER NOT NULL,
+            unidades_vendidas INTEGER NOT NULL,
+            precio_unitario REAL NOT NULL,
+            total_venta REAL NOT NULL,
+            vendedor_id INTEGER NOT NULL,
+            empleado_id INTEGER,
+            notas TEXT,
+            FOREIGN KEY (producto_id) REFERENCES productos (id),
+            FOREIGN KEY (vendedor_id) REFERENCES usuarios (id),
+            FOREIGN KEY (empleado_id) REFERENCES empleados (id)
+        )
+        ''')
+        
+        # Insertar ventas de ejemplo
+        ventas_ejemplo = [
+            (1, 5, 12000, 60000, 1, 1, 'Venta de acetaminofén'),
+            (2, 3, 25000, 75000, 1, 1, 'Venta de amoxicilina'),
+            (3, 10, 8500, 85000, 1, 1, 'Venta de jabón antibacterial')
+        ]
+        
+        c.executemany('''
+        INSERT INTO ventas (producto_id, unidades_vendidas, precio_unitario, total_venta, vendedor_id, empleado_id, notas)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', ventas_ejemplo)
         
         conn.commit()
         conn.close()
@@ -301,8 +392,160 @@ def has_permission(user, required_permission):
     return required_permission in user_permissions.split(',')
 
 # =============================================================================
-# FUNCIONES DE EMPLEADOS
+# FUNCIONES DE PRODUCTOS
 # =============================================================================
+def get_products():
+    """Obtiene todos los productos activos"""
+    conn = get_connection()
+    if not conn:
+        return pd.DataFrame()
+    
+    try:
+        query = '''
+        SELECT id, codigo, nombre, descripcion, categoria, 
+               precio_unitario, stock, unidad_medida
+        FROM productos 
+        WHERE activo = 1
+        ORDER BY nombre
+        '''
+        df = pd.read_sql_query(query, conn)
+        return df
+    except Exception as e:
+        st.error(f"Error obteniendo productos: {str(e)}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+
+def get_product_by_id(producto_id):
+    """Obtiene un producto por su ID"""
+    conn = get_connection()
+    if not conn:
+        return None
+    
+    try:
+        c = conn.cursor()
+        c.execute('SELECT * FROM productos WHERE id = ?', (producto_id,))
+        row = c.fetchone()
+        
+        if row:
+            if isinstance(row, sqlite3.Row):
+                return dict(row)
+            else:
+                columns = ['id', 'codigo', 'nombre', 'descripcion', 'categoria', 
+                          'precio_unitario', 'stock', 'unidad_medida', 'activo']
+                return {columns[i]: row[i] for i in range(len(columns)) if i < len(row)}
+        return None
+        
+    except Exception as e:
+        st.error(f"Error obteniendo producto: {str(e)}")
+        return None
+    finally:
+        conn.close()
+
+
+def update_product_stock(producto_id, unidades_vendidas):
+    """Actualiza el stock de un producto después de una venta"""
+    conn = get_connection()
+    if not conn:
+        return False
+    
+    try:
+        c = conn.cursor()
+        # Restar las unidades vendidas del stock
+        c.execute('''
+        UPDATE productos 
+        SET stock = stock - ? 
+        WHERE id = ? AND stock >= ?
+        ''', (unidades_vendidas, producto_id, unidades_vendidas))
+        
+        conn.commit()
+        return c.rowcount > 0
+    except Exception as e:
+        st.error(f"Error actualizando stock: {str(e)}")
+        return False
+    finally:
+        conn.close()
+
+# =============================================================================
+# FUNCIONES DE VENTAS
+# =============================================================================
+def register_sale(producto_id, unidades_vendidas, vendedor_id, empleado_id=None, notas=""):
+    """Registra una nueva venta en el sistema"""
+    conn = get_connection()
+    if not conn:
+        return False, "Error de conexión"
+    
+    try:
+        # Obtener información del producto
+        producto = get_product_by_id(producto_id)
+        if not producto:
+            return False, "Producto no encontrado"
+        
+        # Verificar stock disponible
+        if producto['stock'] < unidades_vendidas:
+            return False, f"Stock insuficiente. Disponible: {producto['stock']} {producto['unidad_medida']}"
+        
+        precio_unitario = producto['precio_unitario']
+        total_venta = precio_unitario * unidades_vendidas
+        
+        c = conn.cursor()
+        
+        # Registrar la venta
+        c.execute('''
+        INSERT INTO ventas (producto_id, unidades_vendidas, precio_unitario, 
+                           total_venta, vendedor_id, empleado_id, notas)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (producto_id, unidades_vendidas, precio_unitario, 
+              total_venta, vendedor_id, empleado_id, notas))
+        
+        # Actualizar stock
+        if update_product_stock(producto_id, unidades_vendidas):
+            conn.commit()
+            return True, "✅ Venta registrada exitosamente"
+        else:
+            conn.rollback()
+            return False, "❌ Error al actualizar stock"
+        
+    except Exception as e:
+        conn.rollback()
+        return False, f"❌ Error: {str(e)}"
+    finally:
+        conn.close()
+
+
+def get_sales_by_user(vendedor_id):
+    """Obtiene las ventas realizadas por un usuario"""
+    conn = get_connection()
+    if not conn:
+        return pd.DataFrame()
+    
+    try:
+        query = '''
+        SELECT 
+            v.id,
+            v.fecha,
+            p.codigo as producto_codigo,
+            p.nombre as producto_nombre,
+            v.unidades_vendidas,
+            v.precio_unitario,
+            v.total_venta,
+            v.notas
+        FROM ventas v
+        JOIN productos p ON v.producto_id = p.id
+        WHERE v.vendedor_id = ?
+        ORDER BY v.fecha DESC
+        LIMIT 50
+        '''
+        df = pd.read_sql_query(query, conn, params=(vendedor_id,))
+        return df
+    except Exception as e:
+        st.error(f"Error obteniendo ventas: {str(e)}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
+
+
 def get_employees():
     """Obtiene todos los empleados"""
     conn = get_connection()
@@ -314,6 +557,7 @@ def get_employees():
         SELECT id, codigo, nombre, cargo, area, telefono, email, activo,
                fecha_ingreso
         FROM empleados 
+        WHERE activo = 1
         ORDER BY nombre
         '''
         df = pd.read_sql_query(query, conn)
@@ -405,7 +649,6 @@ def get_employee_by_id(empleado_id):
         row = c.fetchone()
         
         if row:
-            # Convertir a diccionario de forma segura
             if isinstance(row, sqlite3.Row):
                 return dict(row)
             else:
@@ -427,7 +670,7 @@ def show_login():
     st.markdown("""
     <div class="main-header">
         <h1>🏥 Sistema de Gestión - Droguería Restrepo</h1>
-        <p>Sistema de Gestión de Empleados</p>
+        <p>Sistema de Gestión de Ventas y Empleados</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -441,8 +684,11 @@ def show_login():
         # Información de acceso
         with st.expander("📋 Credenciales de acceso por defecto"):
             st.info("""
-            **Usuario:** admin  
-            **Contraseña:** admin123
+            **Usuario admin:** 
+            - admin / admin123
+            
+            **Usuario vendedor:**
+            - vendedor / vendedor123
             
             *Estas credenciales se crean automáticamente al inicializar el sistema.*
             """)
@@ -504,10 +750,20 @@ def main_app():
             st.session_state.edit_employee_id = None
             st.rerun()
         
+        if has_permission(user, "register_sales"):
+            if st.button("💰 **Registrar Venta**", use_container_width=True):
+                st.session_state.page = "registrar_venta"
+                st.rerun()
+        
         if has_permission(user, "manage_employees"):
             if st.button("👥 **Gestión de Empleados**", use_container_width=True):
                 st.session_state.page = "empleados"
                 st.session_state.edit_employee_id = None
+                st.rerun()
+        
+        if has_permission(user, "view_sales"):
+            if st.button("📊 **Mis Ventas**", use_container_width=True):
+                st.session_state.page = "mis_ventas"
                 st.rerun()
         
         st.divider()
@@ -519,11 +775,20 @@ def main_app():
                 c = conn.cursor()
                 c.execute("SELECT COUNT(*) FROM empleados WHERE activo = 1")
                 total_empleados = c.fetchone()[0]
+                
+                c.execute("SELECT COUNT(*) FROM productos WHERE activo = 1 AND stock > 0")
+                productos_stock = c.fetchone()[0]
+                
+                c.execute("SELECT SUM(total_venta) FROM ventas WHERE DATE(fecha) = DATE('now')")
+                ventas_hoy = c.fetchone()[0] or 0
+                
                 conn.close()
                 
                 st.markdown(f"**📊 Empleados activos:** {total_empleados}")
+                st.markdown(f"**📦 Productos en stock:** {productos_stock}")
+                st.markdown(f"**💰 Ventas hoy:** ${ventas_hoy:,.0f}")
         except:
-            st.markdown("**📊 Empleados activos:** N/A")
+            st.markdown("**📊 Estadísticas:** N/A")
         
         st.divider()
         
@@ -541,7 +806,7 @@ def main_app():
         st.title("🏠 Panel de Control")
         
         # Tarjetas de métricas
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             st.metric("👤 Usuario Activo", user['nombre'], user['rol'])
@@ -558,7 +823,26 @@ def main_app():
                 st.metric("👥 Empleados Activos", "N/A")
         
         with col3:
-            st.metric("✅ Sistema", "Operativo", "Estable")
+            try:
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute("SELECT COUNT(*) FROM productos WHERE activo = 1")
+                total_prod = c.fetchone()[0]
+                conn.close()
+                st.metric("📦 Productos Activos", total_prod)
+            except:
+                st.metric("📦 Productos", "N/A")
+        
+        with col4:
+            try:
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute("SELECT SUM(total_venta) FROM ventas")
+                total_ventas = c.fetchone()[0] or 0
+                conn.close()
+                st.metric("💰 Ventas Totales", f"${total_ventas:,.0f}")
+            except:
+                st.metric("💰 Ventas", "N/A")
         
         st.divider()
         
@@ -570,6 +854,12 @@ def main_app():
         with col_info1:
             st.info("""
             **Funcionalidades disponibles:**
+            
+            ✅ **Registrar Ventas**
+            - Seleccionar productos
+            - Ingresar cantidad vendida
+            - Registrar venta en tiempo real
+            - Control de inventario automático
             
             ✅ **Gestión de Empleados**
             - Agregar nuevos empleados
@@ -587,15 +877,258 @@ def main_app():
             st.success("""
             **Accesos rápidos:**
             
+            💰 **Registrar Ventas**
+            - Solo para vendedores y superiores
+            - Acceso desde el menú lateral
+            
             👥 **Gestión de Empleados**
             - Solo para administradores y gerentes
             - Acceso desde el menú lateral
             
-            🔐 **Seguridad**
-            - Contraseñas encriptadas
-            - Sesiones seguras
-            - Control de acceso
+            📊 **Mis Ventas**
+            - Ver historial de ventas propias
+            - Filtro por fechas
+            - Reporte de ventas diarias
             """)
+    
+    # PÁGINA DE REGISTRAR VENTA
+    elif st.session_state.page == "registrar_venta":
+        if not has_permission(user, "register_sales"):
+            st.error("❌ No tienes permisos para acceder a esta sección")
+            return
+        
+        st.title("💰 Registrar Unidades Vendidas")
+        
+        # Obtener productos disponibles
+        df_productos = get_products()
+        
+        if df_productos.empty:
+            st.warning("📭 No hay productos disponibles en el sistema.")
+            st.info("Contacta al administrador para agregar productos al inventario.")
+            return
+        
+        # Crear formulario en dos columnas
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.subheader("📝 Nueva Venta")
+            
+            # Seleccionar producto
+            productos_opciones = df_productos[['id', 'codigo', 'nombre', 'precio_unitario', 'stock', 'unidad_medida']]
+            productos_opciones['display'] = productos_opciones.apply(
+                lambda x: f"{x['codigo']} - {x['nombre']} (Stock: {x['stock']} {x['unidad_medida']}, ${x['precio_unitario']:,.0f} c/u)", 
+                axis=1
+            )
+            
+            producto_seleccionado = st.selectbox(
+                "🔍 **Seleccionar Producto:**",
+                options=productos_opciones.to_dict('records'),
+                format_func=lambda x: x['display'],
+                key="select_producto_venta"
+            )
+            
+            if producto_seleccionado:
+                # Mostrar información del producto seleccionado
+                with st.expander("📋 Información del Producto", expanded=True):
+                    col_info1, col_info2 = st.columns(2)
+                    with col_info1:
+                        st.markdown(f"**Código:** {producto_seleccionado['codigo']}")
+                        st.markdown(f"**Nombre:** {producto_seleccionado['nombre']}")
+                        st.markdown(f"**Stock disponible:** {producto_seleccionado['stock']} {producto_seleccionado['unidad_medida']}")
+                    with col_info2:
+                        st.markdown(f"**Precio unitario:** ${producto_seleccionado['precio_unitario']:,.0f}")
+                        st.markdown(f"**Unidad de medida:** {producto_seleccionado['unidad_medida']}")
+                
+                # Campo para unidades vendidas
+                unidades = st.number_input(
+                    f"🔢 **Unidades Vendidas ({producto_seleccionado['unidad_medida']}):**",
+                    min_value=1,
+                    max_value=producto_seleccionado['stock'],
+                    value=1,
+                    step=1,
+                    key="unidades_venta"
+                )
+                
+                # Calcular total
+                total = unidades * producto_seleccionado['precio_unitario']
+                
+                # Mostrar resumen
+                st.markdown("---")
+                st.markdown("### 📊 Resumen de Venta")
+                
+                col_res1, col_res2, col_res3 = st.columns(3)
+                with col_res1:
+                    st.metric("Precio Unitario", f"${producto_seleccionado['precio_unitario']:,.0f}")
+                with col_res2:
+                    st.metric("Cantidad", f"{unidades} {producto_seleccionado['unidad_medida']}")
+                with col_res3:
+                    st.metric("Total Venta", f"${total:,.0f}")
+                
+                # Notas adicionales
+                notas = st.text_area(
+                    "📝 **Notas (opcional):**",
+                    placeholder="Ej: Venta al contado, cliente preferencial, etc.",
+                    max_chars=200,
+                    height=80
+                )
+                
+                # Opción para seleccionar empleado (para vendedores que trabajan con varios empleados)
+                empleado_id = None
+                if user['rol'] in ['admin', 'gerente']:
+                    df_empleados = get_employees()
+                    if not df_empleados.empty:
+                        empleados_opciones = df_empleados[['id', 'codigo', 'nombre']].to_dict('records')
+                        empleado_seleccionado = st.selectbox(
+                            "👤 **Asociar a Empleado (opcional):**",
+                            options=empleados_opciones,
+                            format_func=lambda x: f"{x['codigo']} - {x['nombre']}",
+                            key="select_empleado_venta"
+                        )
+                        if empleado_seleccionado:
+                            empleado_id = empleado_seleccionado['id']
+                
+                # Botón para registrar venta
+                if st.button("💾 **Registrar Venta**", type="primary", use_container_width=True):
+                    if unidades <= 0:
+                        st.error("❌ La cantidad debe ser mayor a cero")
+                    else:
+                        with st.spinner("Registrando venta..."):
+                            success, message = register_sale(
+                                producto_seleccionado['id'],
+                                unidades,
+                                user['id'],
+                                empleado_id,
+                                notas
+                            )
+                            if success:
+                                st.success(message)
+                                
+                                # Mostrar recibo
+                                with st.expander("🧾 Ver Recibo de Venta", expanded=True):
+                                    st.markdown("""
+                                    <div class="success-card">
+                                    """, unsafe_allow_html=True)
+                                    st.markdown(f"### ✅ Venta Registrada Exitosamente")
+                                    st.markdown(f"**Fecha:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                                    st.markdown(f"**Producto:** {producto_seleccionado['nombre']}")
+                                    st.markdown(f"**Código:** {producto_seleccionado['codigo']}")
+                                    st.markdown(f"**Cantidad:** {unidades} {producto_seleccionado['unidad_medida']}")
+                                    st.markdown(f"**Precio Unitario:** ${producto_seleccionado['precio_unitario']:,.0f}")
+                                    st.markdown(f"**Total Venta:** ${total:,.0f}")
+                                    if notas:
+                                        st.markdown(f"**Notas:** {notas}")
+                                    st.markdown("""
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                
+                                # Opción para nueva venta
+                                col_btn1, col_btn2 = st.columns(2)
+                                with col_btn1:
+                                    if st.button("🔄 **Nueva Venta**", use_container_width=True):
+                                        st.rerun()
+                                with col_btn2:
+                                    if st.button("🏠 **Ir al Inicio**", use_container_width=True):
+                                        st.session_state.page = "inicio"
+                                        st.rerun()
+                            else:
+                                st.error(message)
+        
+        with col2:
+            st.subheader("📦 Productos Disponibles")
+            
+            # Filtrar productos
+            categoria_filtro = st.selectbox(
+                "Filtrar por categoría:",
+                ["Todas"] + sorted(df_productos['categoria'].unique().tolist())
+            )
+            
+            if categoria_filtro != "Todas":
+                productos_filtrados = df_productos[df_productos['categoria'] == categoria_filtro]
+            else:
+                productos_filtrados = df_productos
+            
+            # Mostrar lista de productos
+            for _, prod in productos_filtrados.iterrows():
+                with st.container():
+                    st.markdown(f"""
+                    **{prod['codigo']} - {prod['nombre']}**
+                    - **Precio:** ${prod['precio_unitario']:,.0f}
+                    - **Stock:** {prod['stock']} {prod['unidad_medida']}
+                    - **Categoría:** {prod['categoria']}
+                    """)
+                    st.divider()
+    
+    # PÁGINA DE MIS VENTAS
+    elif st.session_state.page == "mis_ventas":
+        if not has_permission(user, "view_sales"):
+            st.error("❌ No tienes permisos para acceder a esta sección")
+            return
+        
+        st.title("📊 Mis Ventas Registradas")
+        
+        # Obtener ventas del usuario
+        df_ventas = get_sales_by_user(user['id'])
+        
+        if df_ventas.empty:
+            st.warning("📭 No has registrado ninguna venta aún.")
+            st.info("Usa la opción '💰 Registrar Venta' para comenzar a registrar ventas.")
+        else:
+            # Mostrar estadísticas
+            col_stats1, col_stats2, col_stats3, col_stats4 = st.columns(4)
+            
+            with col_stats1:
+                total_ventas = len(df_ventas)
+                st.metric("Total Ventas", total_ventas)
+            
+            with col_stats2:
+                unidades_total = df_ventas['unidades_vendidas'].sum()
+                st.metric("Unidades Vendidas", unidades_total)
+            
+            with col_stats3:
+                monto_total = df_ventas['total_venta'].sum()
+                st.metric("Monto Total", f"${monto_total:,.0f}")
+            
+            with col_stats4:
+                venta_promedio = monto_total / total_ventas if total_ventas > 0 else 0
+                st.metric("Venta Promedio", f"${venta_promedio:,.0f}")
+            
+            st.divider()
+            
+            # Mostrar tabla de ventas
+            st.subheader("📋 Historial de Ventas")
+            
+            # Formatear datos para visualización
+            df_display = df_ventas.copy()
+            df_display['fecha'] = pd.to_datetime(df_display['fecha'])
+            df_display['fecha_formateada'] = df_display['fecha'].dt.strftime('%Y-%m-%d %H:%M')
+            df_display['precio_unitario_fmt'] = df_display['precio_unitario'].apply(lambda x: f"${x:,.0f}")
+            df_display['total_venta_fmt'] = df_display['total_venta'].apply(lambda x: f"${x:,.0f}")
+            
+            # Mostrar tabla
+            st.dataframe(
+                df_display[['fecha_formateada', 'producto_codigo', 'producto_nombre', 
+                          'unidades_vendidas', 'precio_unitario_fmt', 'total_venta_fmt', 'notas']],
+                column_config={
+                    'fecha_formateada': 'Fecha',
+                    'producto_codigo': 'Código',
+                    'producto_nombre': 'Producto',
+                    'unidades_vendidas': 'Cantidad',
+                    'precio_unitario_fmt': 'Precio Unitario',
+                    'total_venta_fmt': 'Total',
+                    'notas': 'Notas'
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # Opción para exportar datos
+            st.download_button(
+                label="📥 Descargar Reporte (CSV)",
+                data=df_ventas.to_csv(index=False).encode('utf-8'),
+                file_name=f"ventas_{user['username']}_{date.today()}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
     
     # PÁGINA DE GESTIÓN DE EMPLEADOS
     elif st.session_state.page == "empleados":
@@ -622,69 +1155,62 @@ def main_app():
                 st.warning("📭 No hay empleados registrados en el sistema.")
                 st.info("Usa la pestaña '➕ Nuevo Empleado' para agregar el primero.")
             else:
-                # Filtrar empleados activos
-                df_activos = df_empleados[df_empleados['activo'] == 1]
-                
                 # Mostrar empleados activos
-                if not df_activos.empty:
-                    st.markdown(f"**Empleados activos ({len(df_activos)}):**")
-                    
-                    # Mostrar tabla
-                    st.dataframe(
-                        df_activos[['codigo', 'nombre', 'cargo', 'area', 'telefono', 'email']],
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                else:
-                    st.warning("⚠️ No hay empleados activos en el sistema.")
+                st.markdown(f"**Empleados activos ({len(df_empleados)}):**")
+                
+                # Mostrar tabla
+                st.dataframe(
+                    df_empleados[['codigo', 'nombre', 'cargo', 'area', 'telefono', 'email']],
+                    use_container_width=True,
+                    hide_index=True
+                )
                 
                 # Opciones de acción
-                if not df_activos.empty:
-                    st.subheader("⚙️ Acciones")
+                st.subheader("⚙️ Acciones")
+                
+                empleados_activos = df_empleados[['id', 'codigo', 'nombre']].to_dict('records')
+                
+                col_act1, col_act2 = st.columns(2)
+                
+                with col_act1:
+                    empleado_seleccionado = st.selectbox(
+                        "Seleccionar empleado para editar:",
+                        options=empleados_activos,
+                        format_func=lambda x: f"{x['codigo']} - {x['nombre']}",
+                        key="select_empleado_lista"
+                    )
                     
-                    empleados_activos = df_activos[['id', 'codigo', 'nombre']].to_dict('records')
-                    
-                    col_act1, col_act2 = st.columns(2)
-                    
-                    with col_act1:
-                        empleado_seleccionado = st.selectbox(
-                            "Seleccionar empleado para editar:",
-                            options=empleados_activos,
-                            format_func=lambda x: f"{x['codigo']} - {x['nombre']}",
-                            key="select_empleado_lista"
-                        )
-                        
-                        if empleado_seleccionado and st.button(
-                            "✏️ **Editar Empleado**", 
+                    if empleado_seleccionado and st.button(
+                        "✏️ **Editar Empleado**", 
+                        use_container_width=True,
+                        key="btn_editar_lista"
+                    ):
+                        st.session_state.edit_employee_id = empleado_seleccionado['id']
+                        st.rerun()
+                
+                with col_act2:
+                    if empleado_seleccionado:
+                        if st.button(
+                            "🗑️ **Desactivar Empleado**", 
                             use_container_width=True,
-                            key="btn_editar_lista"
+                            type="secondary",
+                            key="btn_desactivar_lista"
                         ):
-                            st.session_state.edit_employee_id = empleado_seleccionado['id']
-                            st.rerun()
-                    
-                    with col_act2:
-                        if empleado_seleccionado:
-                            if st.button(
-                                "🗑️ **Desactivar Empleado**", 
-                                use_container_width=True,
-                                type="secondary",
-                                key="btn_desactivar_lista"
-                            ):
-                                st.warning(f"⚠️ ¿Desactivar a {empleado_seleccionado['nombre']}?")
-                                col_conf1, col_conf2 = st.columns(2)
-                                with col_conf1:
-                                    if st.button("✅ Sí, desactivar", use_container_width=True, key="confirm_desactivar"):
-                                        with st.spinner("Desactivando empleado..."):
-                                            success, message = delete_employee(empleado_seleccionado['id'])
-                                            if success:
-                                                st.success(message)
-                                                time.sleep(1)
-                                                st.rerun()
-                                            else:
-                                                st.error(message)
-                                with col_conf2:
-                                    if st.button("❌ Cancelar", use_container_width=True, key="cancel_desactivar"):
-                                        st.rerun()
+                            st.warning(f"⚠️ ¿Desactivar a {empleado_seleccionado['nombre']}?")
+                            col_conf1, col_conf2 = st.columns(2)
+                            with col_conf1:
+                                if st.button("✅ Sí, desactivar", use_container_width=True, key="confirm_desactivar"):
+                                    with st.spinner("Desactivando empleado..."):
+                                        success, message = delete_employee(empleado_seleccionado['id'])
+                                        if success:
+                                            st.success(message)
+                                            time.sleep(1)
+                                            st.rerun()
+                                        else:
+                                            st.error(message)
+                            with col_conf2:
+                                if st.button("❌ Cancelar", use_container_width=True, key="cancel_desactivar"):
+                                    st.rerun()
         
         # TAB 2: Nuevo empleado
         with tab_nuevo:
