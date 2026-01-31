@@ -7,7 +7,7 @@ import hashlib
 import secrets
 import os
 import time
-from datetime import date
+from datetime import date, datetime
 
 # =============================================================================
 # CONFIGURACIÓN STREAMLIT
@@ -72,6 +72,46 @@ def hash_password(password, salt=None):
     return h, salt
 
 
+def check_and_fix_database():
+    """Verifica y repara la estructura de la base de datos"""
+    try:
+        conn = get_connection()
+        if not conn:
+            return False
+            
+        c = conn.cursor()
+        
+        # Verificar si la tabla empleados existe
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='empleados'")
+        if not c.fetchone():
+            # Tabla no existe, hay que crear todas las tablas desde cero
+            conn.close()
+            return False
+        
+        # Verificar si la tabla empleados tiene la columna 'codigo'
+        c.execute("PRAGMA table_info(empleados)")
+        columns = c.fetchall()
+        column_names = [col[1] for col in columns]
+        
+        conn.close()
+        
+        # Lista de columnas requeridas para la tabla empleados
+        required_columns = ['id', 'codigo', 'nombre', 'cargo', 'area', 'telefono', 'email', 'activo', 'fecha_ingreso']
+        
+        # Verificar si faltan columnas
+        missing_columns = set(required_columns) - set(column_names)
+        
+        if missing_columns:
+            st.warning(f"⚠️ Faltan columnas en la tabla empleados: {missing_columns}")
+            return False
+            
+        return True
+        
+    except Exception as e:
+        st.error(f"Error verificando base de datos: {str(e)}")
+        return False
+
+
 def initialize_database():
     """Inicializa la base de datos desde cero"""
     try:
@@ -109,7 +149,7 @@ def initialize_database():
         )
         ''')
         
-        # Tabla de empleados
+        # Tabla de empleados - Asegurando que todas las columnas estén presentes
         c.execute('''
         CREATE TABLE IF NOT EXISTS empleados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,8 +215,8 @@ def initialize_database():
                 (codigo, nombre, cargo, area, telefono, email) 
                 VALUES (?, ?, ?, ?, ?, ?)
                 ''', emp)
-            except:
-                pass
+            except Exception as e:
+                print(f"Error insertando empleado {emp[0]}: {e}")
         
         conn.commit()
         conn.close()
@@ -188,8 +228,8 @@ def initialize_database():
         return False
 
 
-def check_database_tables():
-    """Verifica si todas las tablas necesarias existen"""
+def fix_database_structure():
+    """Intenta reparar la estructura de la base de datos sin borrar datos"""
     try:
         conn = get_connection()
         if not conn:
@@ -197,43 +237,45 @@ def check_database_tables():
             
         c = conn.cursor()
         
-        # Lista de tablas requeridas
-        required_tables = ['roles', 'usuarios', 'empleados']
+        # Verificar estructura de cada tabla y corregir si es necesario
+        c.execute("PRAGMA table_info(empleados)")
+        empleados_columns = c.fetchall()
+        empleados_column_names = [col[1] for col in empleados_columns]
         
-        # Verificar cada tabla
-        for table in required_tables:
-            c.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
-            if not c.fetchone():
+        # Si falta la columna 'codigo', intentar agregarla
+        if 'codigo' not in empleados_column_names:
+            try:
+                c.execute("ALTER TABLE empleados ADD COLUMN codigo TEXT UNIQUE")
+                st.info("✅ Columna 'codigo' agregada a tabla empleados")
+            except:
+                # Si no se puede agregar, mejor recrear la tabla
                 conn.close()
                 return False
         
-        # Verificar que haya datos en roles
-        c.execute("SELECT COUNT(*) FROM roles")
-        if c.fetchone()[0] == 0:
-            conn.close()
-            return False
+        # Verificar otras columnas necesarias
+        required_columns = ['nombre', 'cargo', 'area', 'telefono', 'email', 'activo', 'fecha_ingreso']
         
-        # Verificar que haya usuario admin
-        c.execute("SELECT COUNT(*) FROM usuarios WHERE username='admin'")
-        if c.fetchone()[0] == 0:
-            conn.close()
-            return False
+        for column in required_columns:
+            if column not in empleados_column_names:
+                st.warning(f"Columna '{column}' faltante en empleados")
+                return False
         
+        conn.commit()
         conn.close()
         return True
         
     except Exception as e:
-        st.error(f"Error verificando tablas: {str(e)}")
+        st.error(f"Error reparando estructura de BD: {str(e)}")
         return False
 
 
 def force_database_initialization():
-    """Fuerza la inicialización de la base de datos"""
-    with st.spinner("🔄 Inicializando base de datos..."):
+    """Fuerza la inicialización completa de la base de datos"""
+    with st.spinner("🔄 Inicializando base de datos desde cero..."):
         success = initialize_database()
         if success:
             st.success("✅ Base de datos inicializada correctamente!")
-            time.sleep(1)
+            time.sleep(2)
             st.rerun()
         else:
             st.error("❌ Error al inicializar la base de datos")
@@ -307,7 +349,7 @@ def get_employees():
     try:
         query = '''
         SELECT id, codigo, nombre, cargo, area, telefono, email, activo,
-               DATE(fecha_ingreso) as fecha_ingreso_formatted
+               DATE(fecha_ingreso) as fecha_ingreso
         FROM empleados 
         ORDER BY nombre
         '''
@@ -335,8 +377,10 @@ def create_employee(codigo, nombre, cargo, area, telefono, email):
         
         conn.commit()
         return True, "✅ Empleado creado exitosamente"
-    except sqlite3.IntegrityError:
-        return False, "❌ El código ya existe"
+    except sqlite3.IntegrityError as e:
+        if "UNIQUE constraint failed" in str(e):
+            return False, "❌ El código ya existe"
+        return False, f"❌ Error de integridad: {str(e)}"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
     finally:
@@ -359,8 +403,10 @@ def update_employee(empleado_id, codigo, nombre, cargo, area, telefono, email):
         
         conn.commit()
         return True, "✅ Empleado actualizado exitosamente"
-    except sqlite3.IntegrityError:
-        return False, "❌ El código ya existe"
+    except sqlite3.IntegrityError as e:
+        if "UNIQUE constraint failed" in str(e):
+            return False, "❌ El código ya existe"
+        return False, f"❌ Error de integridad: {str(e)}"
     except Exception as e:
         return False, f"❌ Error: {str(e)}"
     finally:
@@ -455,7 +501,7 @@ def show_login():
         with col_btn2:
             if st.button("🔄 **Reiniciar Sistema**", use_container_width=True, type="secondary"):
                 st.warning("⚠️ Esta acción eliminará todos los datos y reiniciará el sistema.")
-                if st.checkbox("Confirmar reinicio"):
+                if st.checkbox("Confirmar reinicio", key="confirm_reset"):
                     if force_database_initialization():
                         st.success("✅ Sistema reiniciado correctamente")
                         st.rerun()
@@ -591,6 +637,30 @@ def main_app():
         
         st.title("👥 Gestión de Empleados")
         
+        # Verificar estructura de la tabla empleados antes de continuar
+        try:
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("PRAGMA table_info(empleados)")
+            columns = c.fetchall()
+            column_names = [col[1] for col in columns]
+            conn.close()
+            
+            # Verificar columna 'codigo'
+            if 'codigo' not in column_names:
+                st.error("❌ Error crítico: La tabla 'empleados' no tiene la columna 'codigo'")
+                st.warning("⚠️ Es necesario reiniciar la base de datos")
+                if st.button("🔄 **Reiniciar Base de Datos Ahora**", type="primary"):
+                    if force_database_initialization():
+                        st.success("✅ Base de datos reiniciada. Recarga la página.")
+                    else:
+                        st.error("❌ Error al reiniciar la base de datos")
+                return
+                
+        except Exception as e:
+            st.error(f"❌ Error verificando estructura de la base de datos: {str(e)}")
+            return
+        
         # Pestañas para diferentes funcionalidades
         tab_lista, tab_nuevo, tab_editar = st.tabs([
             "📋 Lista de Empleados", 
@@ -610,7 +680,6 @@ def main_app():
             else:
                 # Filtrar empleados activos
                 df_activos = df_empleados[df_empleados['activo'] == 1]
-                df_inactivos = df_empleados[df_empleados['activo'] == 0]
                 
                 # Mostrar empleados activos
                 if not df_activos.empty:
@@ -641,6 +710,7 @@ def main_app():
                 with col_stat2:
                     st.metric("Activos", len(df_activos))
                 with col_stat3:
+                    df_inactivos = df_empleados[df_empleados['activo'] == 0]
                     st.metric("Inactivos", len(df_inactivos))
                 
                 # Opciones de acción
@@ -678,7 +748,7 @@ def main_app():
                                 st.warning(f"⚠️ ¿Desactivar a {empleado_seleccionado['nombre']}?")
                                 col_conf1, col_conf2 = st.columns(2)
                                 with col_conf1:
-                                    if st.button("✅ Sí, desactivar", use_container_width=True):
+                                    if st.button("✅ Sí, desactivar", use_container_width=True, key="confirm_desactivar"):
                                         with st.spinner("Desactivando empleado..."):
                                             success, message = delete_employee(empleado_seleccionado['id'])
                                             if success:
@@ -688,7 +758,7 @@ def main_app():
                                             else:
                                                 st.error(message)
                                 with col_conf2:
-                                    if st.button("❌ Cancelar", use_container_width=True):
+                                    if st.button("❌ Cancelar", use_container_width=True, key="cancel_desactivar"):
                                         st.rerun()
         
         # TAB 2: Nuevo empleado
@@ -878,21 +948,25 @@ def main():
     if 'edit_employee_id' not in st.session_state:
         st.session_state.edit_employee_id = None
     
-    # Verificar e inicializar base de datos
-    if not check_database_tables():
-        st.warning("⚠️ La base de datos necesita ser inicializada...")
+    # Verificar estructura de la base de datos
+    if not check_and_fix_database():
+        st.warning("⚠️ La base de datos necesita ser inicializada o reparada...")
         
         col_init1, col_init2, col_init3 = st.columns([1, 2, 1])
         with col_init2:
             st.markdown('<div class="login-box">', unsafe_allow_html=True)
-            st.markdown("### 🔧 Configuración Inicial")
+            st.markdown("### 🔧 Configuración Inicial del Sistema")
+            st.error("❌ **Problema detectado:** La tabla 'empleados' no tiene la estructura correcta.")
             st.info("""
-            Es la primera vez que ejecutas el sistema o la base de datos está corrupta.
+            **Se necesita reinicializar la base de datos.**
             
-            **Se crearán:**
-            - Tablas de usuarios, roles y empleados
-            - Usuario administrador (admin/admin123)
-            - Empleados de ejemplo
+            **Esto creará:**
+            - ✅ Tablas de usuarios, roles y empleados
+            - ✅ Usuario administrador (admin/admin123)
+            - ✅ Empleados de ejemplo
+            - ✅ Estructura correcta con columna 'codigo'
+            
+            **Nota:** Si había datos previos, se perderán.
             """)
             
             if st.button("🔄 **Inicializar Base de Datos**", use_container_width=True, type="primary"):
@@ -901,6 +975,18 @@ def main():
                     st.info("Por favor, recarga la página para continuar.")
                 else:
                     st.error("❌ Error al inicializar la base de datos")
+            
+            # Intentar reparar sin borrar datos
+            st.markdown("---")
+            st.markdown("### 🔧 Intentar reparar sin perder datos")
+            st.warning("Esta opción intentará agregar columnas faltantes sin borrar datos existentes.")
+            
+            if st.button("🔧 **Intentar Reparar Estructura**", use_container_width=True, type="secondary"):
+                if fix_database_structure():
+                    st.success("✅ Estructura reparada correctamente!")
+                    st.rerun()
+                else:
+                    st.error("❌ No se pudo reparar la estructura. Se necesita reinicialización completa.")
             
             st.markdown("</div>", unsafe_allow_html=True)
         return
