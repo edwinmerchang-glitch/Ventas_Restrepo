@@ -357,6 +357,10 @@ def create_employee_simple(codigo, nombre, cargo, area, telefono=None, email=Non
         if not nombre or nombre.strip() == "":
             return False, "❌ El nombre es requerido"
         
+        # Preparar valores para teléfono y email
+        telefono_val = telefono.strip() if telefono and telefono.strip() else None
+        email_val = email.strip() if email and email.strip() else None
+        
         # Insertar nuevo empleado
         c.execute("""
             INSERT INTO empleados 
@@ -367,8 +371,8 @@ def create_employee_simple(codigo, nombre, cargo, area, telefono=None, email=Non
             nombre.strip(),
             cargo.strip(),
             area.strip(),
-            telefono.strip() if telefono and telefono.strip() else None,
-            email.strip() if email and email.strip() else None
+            telefono_val,
+            email_val
         ))
         
         conn.commit()
@@ -559,13 +563,15 @@ def show_new_employee_form_simple():
             telefono = st.text_input(
                 "Teléfono",
                 placeholder="3001234567",
-                help="Teléfono de contacto (opcional)"
+                help="Teléfono de contacto (opcional)",
+                value=""
             )
             
             email = st.text_input(
                 "Email",
                 placeholder="empleado@drogueria.com",
-                help="Correo electrónico (opcional)"
+                help="Correo electrónico (opcional)",
+                value=""
             )
         
         # Botón de envío
@@ -587,8 +593,12 @@ def show_new_employee_form_simple():
                 st.error("❌ El área es obligatoria")
             else:
                 with st.spinner("Guardando empleado..."):
+                    # Convertir campos vacíos a None
+                    telefono_val = telefono if telefono.strip() else None
+                    email_val = email if email.strip() else None
+                    
                     success, message = create_employee_simple(
-                        codigo, nombre, cargo, area, telefono, email
+                        codigo, nombre, cargo, area, telefono_val, email_val
                     )
                     
                     if success:
