@@ -291,10 +291,13 @@ def check_authentication(username, password):
         return None
 
 def has_permission(user, required_permission):
-    """Verifica si el usuario tiene el permiso requerido"""
     if not user:
         return False
-    return required_permission in user['permisos'] or 'admin' in user['permisos']
+    return (
+        required_permission in user['permisos']
+        or user.get('rol') == 'admin'
+    )
+
 
 # ============================================================================
 # GESTIÓN DE EMPLEADOS - FUNCIONES FUNCIONALES
