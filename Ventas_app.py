@@ -122,6 +122,19 @@ def initialize_database():
         VALUES (?,?,?,?,?)
         """, ("admin", "Administrador", pwd, salt, rol_id))
 
+    # Verificar y crear empleados de ejemplo si está vacío
+    c.execute("SELECT COUNT(*) FROM empleados")
+    if c.fetchone()[0] == 0:
+        c.executemany(
+            """INSERT INTO empleados (codigo, nombre, cargo, area, telefono, email) 
+            VALUES (?,?,?,?,?,?)""",
+            [
+                ("EMP001", "Juan Pérez", "Vendedor", "Ventas", "3001234567", "juan@empresa.com"),
+                ("EMP002", "María Gómez", "Gerente", "Administración", "3109876543", "maria@empresa.com"),
+                ("EMP003", "Carlos López", "Farmacéutico", "Farmacia", "3204567890", "carlos@empresa.com")
+            ]
+        )
+
     conn.commit()
     conn.close()
 
@@ -130,10 +143,11 @@ def check_database_ready():
     try:
         conn = get_connection()
         c = conn.cursor()
-        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'")
-        ok = c.fetchone() is not None
+        # Verificar que existan las tres tablas principales
+        c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('usuarios', 'roles', 'empleados')")
+        tables = c.fetchall()
         conn.close()
-        return ok
+        return len(tables) == 3
     except:
         return False
 
@@ -177,9 +191,14 @@ def has_permission(user, perm):
 # =============================================================================
 def get_employees():
     conn = get_connection()
-    df = pd.read_sql("SELECT * FROM empleados ORDER BY nombre", conn)
-    conn.close()
-    return df
+    try:
+        df = pd.read_sql("SELECT * FROM empleados ORDER BY nombre", conn)
+        return df
+    except Exception as e:
+        st.error(f"Error al cargar empleados: {e}")
+        return pd.DataFrame()
+    finally:
+        conn.close()
 
 
 def create_employee(codigo, nombre, cargo, area, telefono, email):
@@ -191,9 +210,43 @@ def create_employee(codigo, nombre, cargo, area, telefono, email):
         VALUES (?,?,?,?,?,?)
         """, (codigo, nombre, cargo, area, telefono, email))
         conn.commit()
-        return True
-    except:
-        return False
+        return True, "Empleado creado exitosamente"
+    except sqlite3.IntegrityError:
+        return False, "El código ya existe"
+    except Exception as e:
+        return False, f"Error: {e}"
+    finally:
+        conn.close()
+
+
+def update_employee(empleado_id, codigo, nombre, cargo, area, telefono, email):
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute("""
+        UPDATE empleados 
+        SET codigo=?, nombre=?, cargo=?, area=?, telefono=?, email=?
+        WHERE id=?
+        """, (codigo, nombre, cargo, area, telefono, email, empleado_id))
+        conn.commit()
+        return True, "Empleado actualizado exitosamente"
+    except sqlite3.IntegrityError:
+        return False, "El código ya existe"
+    except Exception as e:
+        return False, f"Error: {e}"
+    finally:
+        conn.close()
+
+
+def delete_employee(empleado_id):
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute("UPDATE empleados SET activo=0 WHERE id=?", (empleado_id,))
+        conn.commit()
+        return True, "Empleado desactivado exitosamente"
+    except Exception as e:
+        return False, f"Error: {e}"
     finally:
         conn.close()
 
@@ -230,6 +283,7 @@ def main():
     st.session_state.setdefault("authenticated", False)
     st.session_state.setdefault("user", None)
     st.session_state.setdefault("page", "inicio")
+    st.session_state.setdefault("edit_employee_id", None)
 
     # Inicializar BD SIEMPRE
     if not check_database_ready():
@@ -248,45 +302,157 @@ def main():
 
         if st.button("🏠 Inicio"):
             st.session_state.page = "inicio"
+            st.session_state.edit_employee_id = None
             st.rerun()
 
         if has_permission(user, "manage_employees"):
             if st.button("👥 Empleados"):
                 st.session_state.page = "empleados"
+                st.session_state.edit_employee_id = None
                 st.rerun()
 
         if st.button("🚪 Cerrar sesión"):
             st.session_state.authenticated = False
             st.session_state.user = None
+            st.session_state.edit_employee_id = None
             st.rerun()
 
     # CONTENIDO
     if st.session_state.page == "inicio":
         st.title("🏠 Panel Principal")
         st.success("Sistema funcionando correctamente ✅")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Usuarios activos", "1")
+        with col2:
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM empleados WHERE activo=1")
+            count = c.fetchone()[0]
+            conn.close()
+            st.metric("Empleados activos", count)
+        with col3:
+            st.metric("Sistema", "Operativo")
 
     if st.session_state.page == "empleados":
         st.title("👥 Gestión de Empleados")
 
-        df = get_employees()
-        st.dataframe(df, use_container_width=True)
-
-        st.divider()
-        st.subheader("➕ Nuevo empleado")
-
-        with st.form("nuevo"):
-            codigo = st.text_input("Código")
-            nombre = st.text_input("Nombre")
-            cargo = st.text_input("Cargo")
-            area = st.text_input("Área")
-            telefono = st.text_input("Teléfono")
-            email = st.text_input("Email")
-            if st.form_submit_button("Guardar"):
-                if create_employee(codigo, nombre, cargo, area, telefono, email):
-                    st.success("Empleado creado")
-                    st.rerun()
+        # Pestañas para diferentes funcionalidades
+        tab1, tab2, tab3 = st.tabs(["📋 Lista de Empleados", "➕ Nuevo Empleado", "✏️ Editar Empleado"])
+        
+        with tab1:
+            df = get_employees()
+            
+            if df.empty:
+                st.info("No hay empleados registrados. Agrega el primero en la pestaña 'Nuevo Empleado'.")
+            else:
+                # Mostrar solo empleados activos
+                df_activos = df[df['activo'] == 1]
+                st.dataframe(df_activos, use_container_width=True, hide_index=True)
+                
+                # Opciones de edición/eliminación
+                st.subheader("Acciones")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    empleados_list = df_activos[['id', 'nombre', 'codigo']].to_dict('records')
+                    if empleados_list:
+                        empleado_seleccionado = st.selectbox(
+                            "Seleccionar empleado para editar",
+                            options=empleados_list,
+                            format_func=lambda x: f"{x['codigo']} - {x['nombre']}"
+                        )
+                        
+                        if empleado_seleccionado and st.button("✏️ Editar empleado"):
+                            st.session_state.edit_employee_id = empleado_seleccionado['id']
+                            st.rerun()
+                
+                with col2:
+                    if empleados_list and st.button("🗑️ Desactivar empleado", type="secondary"):
+                        empleado_seleccionado = empleados_list[0] if empleados_list else None
+                        if empleado_seleccionado:
+                            if st.warning(f"¿Estás seguro de desactivar a {empleado_seleccionado['nombre']}?"):
+                                success, message = delete_employee(empleado_seleccionado['id'])
+                                if success:
+                                    st.success(message)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+        
+        with tab2:
+            st.subheader("➕ Nuevo empleado")
+            
+            with st.form("nuevo_empleado_form"):
+                codigo = st.text_input("Código *", placeholder="Ej: EMP001")
+                nombre = st.text_input("Nombre completo *", placeholder="Ej: Juan Pérez")
+                cargo = st.text_input("Cargo *", placeholder="Ej: Vendedor")
+                area = st.text_input("Área/Dpto *", placeholder="Ej: Ventas")
+                telefono = st.text_input("Teléfono", placeholder="Ej: 3001234567")
+                email = st.text_input("Email", placeholder="Ej: empleado@empresa.com")
+                
+                submitted = st.form_submit_button("✅ Guardar empleado")
+                
+                if submitted:
+                    if not all([codigo, nombre, cargo, area]):
+                        st.error("Por favor complete todos los campos obligatorios (*)")
+                    else:
+                        success, message = create_employee(codigo, nombre, cargo, area, telefono, email)
+                        if success:
+                            st.success(message)
+                            st.rerun()
+                        else:
+                            st.error(message)
+        
+        with tab3:
+            st.subheader("✏️ Editar empleado")
+            
+            if st.session_state.edit_employee_id:
+                # Obtener datos del empleado a editar
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute("SELECT * FROM empleados WHERE id=?", (st.session_state.edit_employee_id,))
+                empleado = c.fetchone()
+                conn.close()
+                
+                if empleado:
+                    with st.form("editar_empleado_form"):
+                        codigo = st.text_input("Código *", value=empleado['codigo'])
+                        nombre = st.text_input("Nombre completo *", value=empleado['nombre'])
+                        cargo = st.text_input("Cargo *", value=empleado['cargo'])
+                        area = st.text_input("Área/Dpto *", value=empleado['area'])
+                        telefono = st.text_input("Teléfono", value=empleado['telefono'] or "")
+                        email = st.text_input("Email", value=empleado['email'] or "")
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            submitted = st.form_submit_button("💾 Guardar cambios")
+                        with col2:
+                            cancel = st.form_submit_button("❌ Cancelar", type="secondary")
+                        
+                        if cancel:
+                            st.session_state.edit_employee_id = None
+                            st.rerun()
+                        
+                        if submitted:
+                            if not all([codigo, nombre, cargo, area]):
+                                st.error("Por favor complete todos los campos obligatorios (*)")
+                            else:
+                                success, message = update_employee(
+                                    st.session_state.edit_employee_id,
+                                    codigo, nombre, cargo, area, telefono, email
+                                )
+                                if success:
+                                    st.success(message)
+                                    st.session_state.edit_employee_id = None
+                                    st.rerun()
+                                else:
+                                    st.error(message)
                 else:
-                    st.error("Error al crear empleado")
+                    st.warning("Empleado no encontrado")
+                    st.session_state.edit_employee_id = None
+            else:
+                st.info("Selecciona un empleado para editar en la pestaña 'Lista de Empleados'")
 
 # =============================================================================
 # EJECUCIÓN
