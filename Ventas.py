@@ -8,6 +8,28 @@ from datetime import datetime
 # -------------------- CONFIG --------------------
 st.set_page_config(page_title="Equipo Locatel Restrepo", layout="wide")
 
+import streamlit as st
+import sqlite3
+import pandas as pd
+import json
+import os
+from datetime import datetime
+
+# -------------------- CONFIG --------------------
+st.set_page_config(page_title="Equipo Locatel Restrepo", layout="wide")
+
+# Configuración para desarrollo - EVITA EL CACHÉ
+import sys
+if "streamlit run" in " ".join(sys.argv):
+    # Deshabilitar caché en desarrollo
+    os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "poll"
+    os.environ["STREAMLIT_SERVER_RUN_ON_SAVE"] = "true"
+    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+
+# Forzar recarga de módulos
+import importlib
+import Ventas as self_module
+importlib.reload(self_module)
 # -------------------- DB --------------------
 def get_connection():
     return sqlite3.connect("ventas.db", check_same_thread=False)
