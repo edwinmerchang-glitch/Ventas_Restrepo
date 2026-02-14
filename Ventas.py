@@ -477,6 +477,32 @@ def pagina_login():
 def pagina_registro_ventas():
     """Página modernizada para que los vendedores registren sus ventas"""
     
+    # Función para obtener fecha en español
+    def obtener_fecha_espanol(fecha):
+        """Convierte una fecha a formato español con nombres de días y meses en español"""
+        dias_semana = {
+            'Monday': 'lunes', 'Tuesday': 'martes', 'Wednesday': 'miércoles',
+            'Thursday': 'jueves', 'Friday': 'viernes', 'Saturday': 'sábado',
+            'Sunday': 'domingo'
+        }
+        meses = {
+            'January': 'enero', 'February': 'febrero', 'March': 'marzo',
+            'April': 'abril', 'May': 'mayo', 'June': 'junio',
+            'July': 'julio', 'August': 'agosto', 'September': 'septiembre',
+            'October': 'octubre', 'November': 'noviembre', 'December': 'diciembre'
+        }
+        
+        dia_ingles = fecha.strftime('%A')
+        mes_ingles = fecha.strftime('%B')
+        
+        dia_espanol = dias_semana.get(dia_ingles, dia_ingles)
+        mes_espanol = meses.get(mes_ingles, mes_ingles)
+        
+        # Capitalizar primera letra del día
+        dia_espanol = dia_espanol.capitalize()
+        
+        return f"{dia_espanol}, {fecha.day} de {mes_espanol} de {fecha.year}"
+    
     # Estilos CSS personalizados
     st.markdown("""
     <style>
@@ -566,44 +592,6 @@ def pagina_registro_ventas():
         font-size: 2rem;
     }
     
-    /* Inputs modernos */
-    .modern-input {
-        border: 2px solid #f0f0f0;
-        border-radius: 12px;
-        padding: 0.8rem;
-        font-size: 1rem;
-        transition: all 0.3s;
-    }
-    .modern-input:focus {
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        outline: none;
-    }
-    
-    /* Botón moderno */
-    .modern-button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        border-radius: 12px;
-        padding: 1rem 2rem;
-        font-size: 1.2rem;
-        font-weight: 600;
-        cursor: pointer;
-        transition: all 0.3s;
-        width: 100%;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-    }
-    .modern-button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
-    }
-    .modern-button:active {
-        transform: translateY(0);
-    }
-    
     /* Tarjeta de registro */
     .history-card {
         background: white;
@@ -655,23 +643,6 @@ def pagina_registro_ventas():
     .animate-in {
         animation: slideIn 0.5s ease forwards;
     }
-    
-    /* Estilo para los inputs de número */
-    div[data-testid="stNumberInput"] label {
-        font-weight: 600;
-        color: #333;
-        font-size: 1rem;
-    }
-    div[data-testid="stNumberInput"] input {
-        border: 2px solid #f0f0f0;
-        border-radius: 12px;
-        padding: 0.8rem;
-        font-size: 1.1rem;
-    }
-    div[data-testid="stNumberInput"] input:focus {
-        border-color: #667eea;
-        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    }
     </style>
     """, unsafe_allow_html=True)
     
@@ -698,11 +669,14 @@ def pagina_registro_ventas():
                 "Cajas": "💰"
             }.get(departamento, "👤")
             
-            # Tarjeta de bienvenida
+            # Obtener fecha en español
+            fecha_espanol = obtener_fecha_espanol(datetime.now())
+            
+            # Tarjeta de bienvenida con fecha en español
             st.markdown(f"""
             <div class="welcome-card animate-in">
                 <h1>¡Hola, {empleado_nombre}! 👋</h1>
-                <p>{depto_emoji} {departamento} • {datetime.now().strftime('%A, %d de %B de %Y')}</p>
+                <p>{depto_emoji} {departamento} • {fecha_espanol}</p>
             </div>
             """, unsafe_allow_html=True)
         else:
