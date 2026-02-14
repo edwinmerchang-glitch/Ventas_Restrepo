@@ -179,81 +179,50 @@ inicializar_estado()
 
 # -------------------- FUNCIONES DE PÁGINAS --------------------
 def pagina_empleados():
-    st.title("👥 Empleados")
+    st.title("👥 Empleados - Registro Diario de Ventas")
     
-    col1, col2 = st.columns(2)
+    # SOLO UNA COLUMNA - Solo el registro de ventas, sin lista de empleados
+    st.subheader("📝 Registro Diario de Ventas")
     
-    with col1:
-        st.subheader("📝 Registro Diario de Ventas")
+    col_fecha, col_nombre = st.columns(2)
+    
+    with col_fecha:
         fecha = st.date_input("📅 Fecha", key="fecha_registro")
-        
+    
+    with col_nombre:
         if not st.session_state.empleados:
-            st.warning("⚠️ No hay empleados registrados. Agrega empleados en la sección de la derecha.")
+            st.warning("⚠️ No hay empleados registrados")
             empleado = st.selectbox("👤 Nombre", ["Sin empleados"])
         else:
             empleado = st.selectbox("👤 Nombre", st.session_state.empleados, key="empleado_select")
-        
+    
+    # Campos de ventas en 2 columnas
+    col1, col2 = st.columns(2)
+    
+    with col1:
         autoliquidable = st.number_input("Autoliquidable", min_value=0, step=1, key="auto")
         oferta = st.number_input("Oferta de la semana", min_value=0, step=1, key="ofer")
-        marca_propia = st.number_input("Marca propia", min_value=0, step=1, key="marca")
-        producto = st.number_input("Producto adicional", min_value=0, step=1, key="prod")
-        
-        if st.button("💾 Guardar registro", use_container_width=True):
-            if st.session_state.empleados:
-                conn = get_connection()
-                c = conn.cursor()
-                c.execute("""
-                    INSERT INTO registros_ventas
-                    (fecha, empleado, autoliquidable, oferta, marca_propia, producto_adicional)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (fecha, empleado, autoliquidable, oferta, marca_propia, producto))
-                conn.commit()
-                conn.close()
-                st.success("✅ Registro guardado")
-                st.rerun()
-            else:
-                st.error("❌ No hay empleados para registrar ventas")
     
     with col2:
-        st.subheader("📋 Lista de Empleados")
-        
-        # Mostrar lista actual
+        marca_propia = st.number_input("Marca propia", min_value=0, step=1, key="marca")
+        producto = st.number_input("Producto adicional", min_value=0, step=1, key="prod")
+    
+    # Botón de guardar
+    if st.button("💾 Guardar registro", use_container_width=True):
         if st.session_state.empleados:
-            for i, emp in enumerate(st.session_state.empleados, 1):
-                st.write(f"{i}. {emp}")
+            conn = get_connection()
+            c = conn.cursor()
+            c.execute("""
+                INSERT INTO registros_ventas
+                (fecha, empleado, autoliquidable, oferta, marca_propia, producto_adicional)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (fecha, empleado, autoliquidable, oferta, marca_propia, producto))
+            conn.commit()
+            conn.close()
+            st.success("✅ Registro guardado")
+            st.rerun()
         else:
-            st.info("No hay empleados registrados")
-        
-        st.divider()
-        
-        # Opción para agregar empleados
-        with st.expander("➕ Agregar nuevo empleado", expanded=True):
-            nuevo_empleado = st.text_input("Nombre del nuevo empleado")
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("Agregar", use_container_width=True):
-                    if nuevo_empleado:
-                        if guardar_empleado_db(nuevo_empleado):
-                            st.session_state.empleados = cargar_empleados_db()
-                            st.success(f"✅ {nuevo_empleado} agregado permanentemente")
-                            st.rerun()
-                        else:
-                            st.error("❌ El empleado ya existe")
-                    else:
-                        st.error("❌ El nombre no puede estar vacío")
-        
-        # Opción para eliminar empleados
-        if st.session_state.empleados:
-            with st.expander("➖ Eliminar empleado"):
-                empleado_a_eliminar = st.selectbox("Seleccionar empleado", st.session_state.empleados, key="eliminar_emp")
-                if st.button("Eliminar", use_container_width=True):
-                    if len(st.session_state.empleados) > 1:
-                        eliminar_empleado_db(empleado_a_eliminar)
-                        st.session_state.empleados = cargar_empleados_db()
-                        st.success(f"✅ {empleado_a_eliminar} eliminado permanentemente")
-                        st.rerun()
-                    else:
-                        st.error("❌ No puedes eliminar el último empleado")
+            st.error("❌ No hay empleados para registrar ventas")
 
 def pagina_config():
     st.title("⚙️ Configuración")
