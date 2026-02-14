@@ -30,15 +30,22 @@ def create_tables():
         )
     """)
     
-    # Tabla de empleados
+    # Tabla de empleados (con departamento)
     c.execute("""
         CREATE TABLE IF NOT EXISTS empleados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre TEXT UNIQUE,
+            departamento TEXT DEFAULT 'Droguería',
             activo INTEGER DEFAULT 1,
             fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # Verificar si la columna departamento existe, si no, agregarla
+    try:
+        c.execute("ALTER TABLE empleados ADD COLUMN departamento TEXT DEFAULT 'Droguería'")
+    except:
+        pass  # La columna ya existe
     
     # Tabla de usuarios del sistema
     c.execute("""
@@ -52,17 +59,30 @@ def create_tables():
         )
     """)
     
-    # Insertar empleados por defecto si no existen
+    # Insertar empleados por defecto si no existen (con departamento)
     empleados_default = [
-        "Angel Bonilla", "Claudia Parada", "Cristina Gomez", "Daniela Velasco",
-        "Darcy Tovar", "Erika Salazar", "Estheiry Cardozo", "Janeth Jimenez",
-        "Jessica Sanabria", "Johanna Cuervo", "Leonardo Vera", "Lucia Guerrero",
-        "Luna Galindez", "Mariana Mejia", "Niyireth Silva", "Ruth Avila", "Valeria Delgado"
+        ("Angel Bonilla", "Droguería"),
+        ("Claudia Parada", "Droguería"),
+        ("Cristina Gomez", "Equipos Médicos"),
+        ("Daniela Velasco", "Tienda"),
+        ("Darcy Tovar", "Cajas"),
+        ("Erika Salazar", "Droguería"),
+        ("Estheiry Cardozo", "Equipos Médicos"),
+        ("Janeth Jimenez", "Tienda"),
+        ("Jessica Sanabria", "Cajas"),
+        ("Johanna Cuervo", "Droguería"),
+        ("Leonardo Vera", "Equipos Médicos"),
+        ("Lucia Guerrero", "Tienda"),
+        ("Luna Galindez", "Cajas"),
+        ("Mariana Mejia", "Droguería"),
+        ("Niyireth Silva", "Equipos Médicos"),
+        ("Ruth Avila", "Tienda"),
+        ("Valeria Delgado", "Cajas")
     ]
     
-    for emp in empleados_default:
+    for emp, depto in empleados_default:
         try:
-            c.execute("INSERT OR IGNORE INTO empleados (nombre) VALUES (?)", (emp,))
+            c.execute("INSERT OR IGNORE INTO empleados (nombre, departamento) VALUES (?, ?)", (emp, depto))
         except:
             pass
     
@@ -78,20 +98,30 @@ def create_tables():
 
 create_tables()
 
-# -------------------- FUNCIONES PARA EMPLEADOS --------------------
+# -------------------- FUNCIONES PARA EMPLEADOS (ACTUALIZADAS) --------------------
 def cargar_empleados_db():
     """Carga los empleados desde la base de datos"""
     conn = get_connection()
-    df = pd.read_sql("SELECT nombre FROM empleados WHERE activo = 1 ORDER BY nombre", conn)
+    df = pd.read_sql("SELECT nombre, departamento FROM empleados WHERE activo = 1 ORDER BY nombre", conn)
     conn.close()
-    return df['nombre'].tolist() if not df.empty else []
+    if not df.empty:
+        # Devolver lista de nombres para compatibilidad con código existente
+        return df['nombre'].tolist()
+    return []
 
-def guardar_empleado_db(nombre):
-    """Guarda un nuevo empleado en la base de datos"""
+def cargar_empleados_con_departamento():
+    """Carga los empleados con su departamento"""
+    conn = get_connection()
+    df = pd.read_sql("SELECT nombre, departamento FROM empleados WHERE activo = 1 ORDER BY nombre", conn)
+    conn.close()
+    return df
+
+def guardar_empleado_db(nombre, departamento):
+    """Guarda un nuevo empleado en la base de datos con su departamento"""
     conn = get_connection()
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO empleados (nombre) VALUES (?)", (nombre,))
+        c.execute("INSERT INTO empleados (nombre, departamento) VALUES (?, ?)", (nombre, departamento))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -106,6 +136,19 @@ def eliminar_empleado_db(nombre):
     c.execute("UPDATE empleados SET activo = 0 WHERE nombre = ?", (nombre,))
     conn.commit()
     conn.close()
+
+def obtener_empleados_por_departamento():
+    """Obtiene el conteo de empleados por departamento"""
+    conn = get_connection()
+    df = pd.read_sql("""
+        SELECT departamento, COUNT(*) as cantidad 
+        FROM empleados 
+        WHERE activo = 1 
+        GROUP BY departamento 
+        ORDER BY departamento
+    """, conn)
+    conn.close()
+    return df
 
 # -------------------- FUNCIONES PARA CONFIGURACIÓN --------------------
 ARCHIVO_CONFIG = "config.json"
@@ -188,8 +231,8 @@ inicializar_estado()
 def pagina_empleados():
     st.title("👥 Empleados - Registro Diario de Ventas")
     
-    # Crear pestañas para separar el registro de ventas de la administración de empleados
-    tab_ventas, tab_admin = st.tabs(["📝 Registrar Ventas", "⚙️ Administrar Empleados"])
+    # Crear pestañas
+    tab_ventas, tab_admin, tab_departamentos = st.tabs(["📝 Registrar Ventas", "⚙️ Administrar Empleados", "📊 Por Departamento"])
     
     with tab_ventas:
         st.subheader("📝 Registro Diario de Ventas")
@@ -204,7 +247,16 @@ def pagina_empleados():
                 st.warning("⚠️ No hay empleados registrados")
                 empleado = st.selectbox("👤 Nombre", ["Sin empleados"])
             else:
-                empleado = st.selectbox("👤 Nombre", st.session_state.empleados, key="empleado_select")
+                # Cargar empleados con departamento para mostrar información adicional
+                empleados_df = cargar_empleados_con_departamento()
+                if not empleados_df.empty:
+                    # Crear opciones con nombre y departamento
+                    opciones = [f"{row['nombre']} ({row['departamento']})" for _, row in empleados_df.iterrows()]
+                    empleado_seleccionado = st.selectbox("👤 Nombre", opciones, key="empleado_select")
+                    # Extraer solo el nombre para guardar en BD
+                    empleado = empleado_seleccionado.split(" (")[0]
+                else:
+                    empleado = st.selectbox("👤 Nombre", ["Sin empleados"])
         
         # Campos de ventas en 2 columnas
         col1, col2 = st.columns(2)
@@ -242,11 +294,16 @@ def pagina_empleados():
             st.markdown("**➕ Agregar Nuevo Empleado**")
             with st.form("form_agregar_empleado"):
                 nuevo_empleado = st.text_input("Nombre completo del empleado")
+                departamento = st.selectbox(
+                    "Departamento",
+                    ["Droguería", "Equipos Médicos", "Tienda", "Cajas"],
+                    key="depto_nuevo"
+                )
                 
                 if st.form_submit_button("Agregar empleado", use_container_width=True):
                     if nuevo_empleado:
-                        if guardar_empleado_db(nuevo_empleado):
-                            st.success(f"✅ Empleado '{nuevo_empleado}' agregado correctamente")
+                        if guardar_empleado_db(nuevo_empleado, departamento):
+                            st.success(f"✅ Empleado '{nuevo_empleado}' agregado al departamento {departamento}")
                             # Actualizar la lista de empleados en el estado
                             st.session_state.empleados = cargar_empleados_db()
                             st.rerun()
@@ -258,21 +315,26 @@ def pagina_empleados():
         with col_lista:
             st.markdown("**📋 Lista de Empleados Activos**")
             
-            if st.session_state.empleados:
-                # Mostrar empleados en una tabla
-                empleados_df = pd.DataFrame({
-                    "Empleado": st.session_state.empleados,
-                    "Acciones": ["Eliminar"] * len(st.session_state.empleados)
-                })
-                
-                for i, emp in enumerate(st.session_state.empleados):
-                    col_emp, col_btn = st.columns([3, 1])
+            empleados_df = cargar_empleados_con_departamento()
+            
+            if not empleados_df.empty:
+                # Mostrar empleados en una tabla con departamento
+                for i, row in empleados_df.iterrows():
+                    col_emp, col_depto, col_btn = st.columns([3, 2, 1])
                     with col_emp:
-                        st.write(f"• {emp}")
+                        st.write(f"• {row['nombre']}")
+                    with col_depto:
+                        depto_color = {
+                            "Droguería": "🔵",
+                            "Equipos Médicos": "🟢",
+                            "Tienda": "🟠",
+                            "Cajas": "🟣"
+                        }.get(row['departamento'], "⚪")
+                        st.write(f"{depto_color} {row['departamento']}")
                     with col_btn:
-                        if st.button("🗑️", key=f"eliminar_{i}", help=f"Eliminar a {emp}"):
-                            eliminar_empleado_db(emp)
-                            st.success(f"✅ Empleado '{emp}' eliminado")
+                        if st.button("🗑️", key=f"eliminar_{i}", help=f"Eliminar a {row['nombre']}"):
+                            eliminar_empleado_db(row['nombre'])
+                            st.success(f"✅ Empleado '{row['nombre']}' eliminado")
                             # Actualizar la lista de empleados
                             st.session_state.empleados = cargar_empleados_db()
                             st.rerun()
@@ -296,6 +358,75 @@ def pagina_empleados():
         
         with col_activos:
             st.metric("Empleados activos", len(st.session_state.empleados))
+    
+    with tab_departamentos:
+        st.subheader("📊 Empleados por Departamento")
+        
+        # Mostrar distribución por departamento
+        deptos_df = obtener_empleados_por_departamento()
+        
+        if not deptos_df.empty:
+            # Gráfico de barras con Plotly
+            import plotly.express as px
+            fig = px.bar(
+                deptos_df, 
+                x='departamento', 
+                y='cantidad',
+                title="Cantidad de Empleados por Departamento",
+                color='departamento',
+                color_discrete_map={
+                    "Droguería": "#1f77b4",
+                    "Equipos Médicos": "#2ca02c",
+                    "Tienda": "#ff7f0e",
+                    "Cajas": "#9467bd"
+                }
+            )
+            fig.update_layout(showlegend=False)
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Mostrar tabla detallada
+            st.subheader("📋 Detalle por Departamento")
+            
+            # Crear columnas para cada departamento
+            cols = st.columns(4)
+            departamentos = ["Droguería", "Equipos Médicos", "Tienda", "Cajas"]
+            colores = {"Droguería": "#1f77b4", "Equipos Médicos": "#2ca02c", 
+                      "Tienda": "#ff7f0e", "Cajas": "#9467bd"}
+            
+            for idx, depto in enumerate(departamentos):
+                with cols[idx]:
+                    cantidad = deptos_df[deptos_df['departamento'] == depto]['cantidad'].values
+                    cantidad = cantidad[0] if len(cantidad) > 0 else 0
+                    
+                    st.markdown(f"""
+                    <div style="
+                        background-color: {colores[depto]}20;
+                        padding: 15px;
+                        border-radius: 10px;
+                        border-left: 5px solid {colores[depto]};
+                        margin-bottom: 10px;
+                    ">
+                        <h4 style="margin:0; color: {colores[depto]};">{depto}</h4>
+                        <h2 style="margin:5px 0;">{cantidad}</h2>
+                        <small>empleados</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            # Lista de empleados por departamento
+            st.subheader("👥 Lista de Empleados por Departamento")
+            
+            empleados_df = cargar_empleados_con_departamento()
+            
+            for depto in departamentos:
+                with st.expander(f"📌 {depto} ({len(empleados_df[empleados_df['departamento'] == depto])} empleados)"):
+                    empleados_depto = empleados_df[empleados_df['departamento'] == depto]
+                    if not empleados_depto.empty:
+                        for _, row in empleados_depto.iterrows():
+                            st.write(f"• {row['nombre']}")
+                    else:
+                        st.write("No hay empleados en este departamento")
+        else:
+            st.info("📭 No hay empleados registrados")
 
 def pagina_config():
     st.title("⚙️ Configuración")
@@ -536,11 +667,19 @@ with col_titulo:
     </div>
     """, unsafe_allow_html=True)
 
+# En el header, después de mostrar el total de empleados, agregar:
 with col_usuario:
+    # Obtener conteo por departamento para mostrar
+    deptos_df = obtener_empleados_por_departamento()
+    deptos_text = ""
+    if not deptos_df.empty:
+        deptos_text = "<br>".join([f"{row['departamento']}: {row['cantidad']}" for _, row in deptos_df.iterrows()])
+    
     st.markdown(f"""
     <div class="header-info" style="text-align: right;">
         <strong>👤 {st.session_state.usuario_actual}</strong><br>
-        <small>Empleados: {len(st.session_state.empleados)}</small>
+        <small>Total: {len(st.session_state.empleados)} empleados</small><br>
+        <small style="font-size: 0.8em;">{deptos_text}</small>
     </div>
     """, unsafe_allow_html=True)
 
