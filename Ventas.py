@@ -473,9 +473,205 @@ def pagina_login():
 
 # -------------------- PÁGINA PARA VENDEDORES --------------------
 def pagina_registro_ventas():
-    """Página simplificada para que los vendedores registren sus ventas"""
+    """Página modernizada para que los vendedores registren sus ventas"""
     
-    st.title("📝 Registro de Ventas - Locatel Restrepo")
+    # Estilos CSS personalizados
+    st.markdown("""
+    <style>
+    /* Tarjeta de bienvenida */
+    .welcome-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 20px;
+        color: white;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        position: relative;
+        overflow: hidden;
+    }
+    .welcome-card::before {
+        content: '🏥';
+        position: absolute;
+        right: 20px;
+        bottom: 20px;
+        font-size: 5rem;
+        opacity: 0.2;
+        transform: rotate(-10deg);
+    }
+    .welcome-card h1 {
+        font-size: 2.5rem;
+        margin: 0;
+        font-weight: 700;
+    }
+    .welcome-card p {
+        font-size: 1.2rem;
+        margin: 0.5rem 0 0 0;
+        opacity: 0.9;
+    }
+    
+    /* Tarjetas de métricas */
+    .metric-card-modern {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 15px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        text-align: center;
+        border: 1px solid #f0f0f0;
+        transition: transform 0.3s ease;
+    }
+    .metric-card-modern:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+    }
+    .metric-icon {
+        font-size: 2.5rem;
+        margin-bottom: 0.5rem;
+    }
+    .metric-value-modern {
+        font-size: 2rem;
+        font-weight: 700;
+        margin: 0;
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .metric-label-modern {
+        color: #666;
+        font-size: 0.9rem;
+        margin: 0;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+    
+    /* Tarjeta de formulario */
+    .form-card {
+        background: white;
+        padding: 2rem;
+        border-radius: 20px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+        border: 1px solid #f0f0f0;
+    }
+    .form-title {
+        color: #333;
+        font-size: 1.5rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .form-title::before {
+        content: '📋';
+        font-size: 2rem;
+    }
+    
+    /* Inputs modernos */
+    .modern-input {
+        border: 2px solid #f0f0f0;
+        border-radius: 12px;
+        padding: 0.8rem;
+        font-size: 1rem;
+        transition: all 0.3s;
+    }
+    .modern-input:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        outline: none;
+    }
+    
+    /* Botón moderno */
+    .modern-button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        border-radius: 12px;
+        padding: 1rem 2rem;
+        font-size: 1.2rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+        width: 100%;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+    .modern-button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+    }
+    .modern-button:active {
+        transform: translateY(0);
+    }
+    
+    /* Tarjeta de registro */
+    .history-card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 15px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        margin-bottom: 1rem;
+        border-left: 5px solid;
+        transition: all 0.3s;
+    }
+    .history-card:hover {
+        transform: translateX(5px);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+    }
+    .history-date {
+        color: #667eea;
+        font-weight: 600;
+        font-size: 1.1rem;
+    }
+    .history-values {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-top: 0.5rem;
+    }
+    .history-tag {
+        background: #f8f9fa;
+        padding: 0.3rem 1rem;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        color: #666;
+    }
+    .history-tag strong {
+        color: #333;
+        margin-right: 5px;
+    }
+    
+    /* Animaciones */
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    .animate-in {
+        animation: slideIn 0.5s ease forwards;
+    }
+    
+    /* Estilo para los inputs de número */
+    div[data-testid="stNumberInput"] label {
+        font-weight: 600;
+        color: #333;
+        font-size: 1rem;
+    }
+    div[data-testid="stNumberInput"] input {
+        border: 2px solid #f0f0f0;
+        border-radius: 12px;
+        padding: 0.8rem;
+        font-size: 1.1rem;
+    }
+    div[data-testid="stNumberInput"] input:focus {
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
     # Información del vendedor
     if st.session_state.usuario_empleado_id:
@@ -489,20 +685,24 @@ def pagina_registro_ventas():
         
         if not df.empty:
             empleado = df.iloc[0]
+            empleado_nombre = empleado['nombre']
+            departamento = empleado['departamento']
+            
+            # Emoji según departamento
+            depto_emoji = {
+                "Droguería": "💊",
+                "Equipos Médicos": "🏥",
+                "Tienda": "🏪",
+                "Cajas": "💰"
+            }.get(departamento, "👤")
+            
+            # Tarjeta de bienvenida
             st.markdown(f"""
-            <div style="
-                background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
-                padding: 1.5rem;
-                border-radius: 10px;
-                margin-bottom: 2rem;
-                border-left: 5px solid #667eea;
-            ">
-                <h2 style="margin:0; color: #667eea;">👤 {empleado['nombre']}</h2>
-                <p style="margin:5px 0 0 0; color: #666; font-size: 1.1em;">{empleado['departamento']}</p>
+            <div class="welcome-card animate-in">
+                <h1>¡Hola, {empleado_nombre}! 👋</h1>
+                <p>{depto_emoji} {departamento} • {datetime.now().strftime('%A, %d de %B de %Y')}</p>
             </div>
             """, unsafe_allow_html=True)
-            
-            empleado_nombre = empleado['nombre']
         else:
             st.error("❌ No se encontró información del empleado")
             return
@@ -510,55 +710,163 @@ def pagina_registro_ventas():
         st.error("❌ Usuario no asociado a un empleado")
         return
     
-    # Formulario de registro
-    col1, col2 = st.columns(2)
+    # Layout principal con columnas
+    col_registro, col_resumen = st.columns([1.2, 0.8])
     
-    with col1:
-        with st.form("form_registro_ventas"):
-            st.subheader("📋 Registrar Ventas del Día")
+    with col_registro:
+        with st.container():
+            st.markdown('<div class="form-card animate-in">', unsafe_allow_html=True)
             
-            fecha = st.date_input("📅 Fecha", value=datetime.now())
+            # Título del formulario
+            st.markdown("""
+            <div class="form-title">
+                Registrar Ventas del Día
+            </div>
+            """, unsafe_allow_html=True)
             
-            col_auto, col_ofer = st.columns(2)
-            with col_auto:
-                autoliquidable = st.number_input("💊 Autoliquidable", min_value=0, step=1, value=0)
-            with col_ofer:
-                oferta = st.number_input("🏷️ Oferta semana", min_value=0, step=1, value=0)
+            # Fecha con estilo
+            col_fecha_icon, col_fecha_picker = st.columns([0.1, 0.9])
+            with col_fecha_icon:
+                st.markdown("### 📅")
+            with col_fecha_picker:
+                fecha = st.date_input(
+                    "Fecha",
+                    value=datetime.now(),
+                    label_visibility="collapsed"
+                )
             
-            col_marca, col_prod = st.columns(2)
-            with col_marca:
-                marca_propia = st.number_input("⭐ Marca propia", min_value=0, step=1, value=0)
-            with col_prod:
-                producto_adicional = st.number_input("➕ Producto adicional", min_value=0, step=1, value=0)
+            st.markdown("<br>", unsafe_allow_html=True)
             
-            submitted = st.form_submit_button("💾 Guardar Registro", use_container_width=True)
+            # Grid de productos
+            col1, col2 = st.columns(2)
             
-            if submitted:
-                conn = get_connection()
-                c = conn.cursor()
-                c.execute("""
-                    INSERT INTO registros_ventas
-                    (fecha, empleado, autoliquidable, oferta, marca_propia, producto_adicional)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (fecha, empleado_nombre, autoliquidable, oferta, marca_propia, producto_adicional))
-                conn.commit()
-                conn.close()
+            with col1:
+                # Tarjeta Autoliquidable
+                st.markdown("""
+                <div style="background: #f8f9fa; padding: 1rem; border-radius: 15px; margin-bottom: 1rem;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 0.5rem;">
+                        <span style="font-size: 1.5rem;">💊</span>
+                        <span style="font-weight: 600; color: #333;">Autoliquidable</span>
+                    </div>
+                """, unsafe_allow_html=True)
+                autoliquidable = st.number_input(
+                    "Autoliquidable",
+                    min_value=0,
+                    step=1,
+                    value=0,
+                    label_visibility="collapsed",
+                    key="auto_input"
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
                 
-                st.success("✅ ¡Ventas registradas exitosamente!")
-                st.balloons()
-                st.rerun()
+                # Tarjeta Marca Propia
+                st.markdown("""
+                <div style="background: #f8f9fa; padding: 1rem; border-radius: 15px; margin-bottom: 1rem;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 0.5rem;">
+                        <span style="font-size: 1.5rem;">⭐</span>
+                        <span style="font-weight: 600; color: #333;">Marca Propia</span>
+                    </div>
+                """, unsafe_allow_html=True)
+                marca_propia = st.number_input(
+                    "Marca Propia",
+                    min_value=0,
+                    step=1,
+                    value=0,
+                    label_visibility="collapsed",
+                    key="marca_input"
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
+            
+            with col2:
+                # Tarjeta Oferta
+                st.markdown("""
+                <div style="background: #f8f9fa; padding: 1rem; border-radius: 15px; margin-bottom: 1rem;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 0.5rem;">
+                        <span style="font-size: 1.5rem;">🏷️</span>
+                        <span style="font-weight: 600; color: #333;">Oferta Semana</span>
+                    </div>
+                """, unsafe_allow_html=True)
+                oferta = st.number_input(
+                    "Oferta Semana",
+                    min_value=0,
+                    step=1,
+                    value=0,
+                    label_visibility="collapsed",
+                    key="oferta_input"
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+                # Tarjeta Producto Adicional
+                st.markdown("""
+                <div style="background: #f8f9fa; padding: 1rem; border-radius: 15px; margin-bottom: 1rem;">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 0.5rem;">
+                        <span style="font-size: 1.5rem;">➕</span>
+                        <span style="font-weight: 600; color: #333;">Producto Adicional</span>
+                    </div>
+                """, unsafe_allow_html=True)
+                producto_adicional = st.number_input(
+                    "Producto Adicional",
+                    min_value=0,
+                    step=1,
+                    value=0,
+                    label_visibility="collapsed",
+                    key="prod_input"
+                )
+                st.markdown("</div>", unsafe_allow_html=True)
+            
+            # Total del registro
+            total_registro = autoliquidable + oferta + marca_propia + producto_adicional
+            st.markdown(f"""
+            <div style="
+                background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+                padding: 1rem;
+                border-radius: 12px;
+                margin: 1rem 0;
+                text-align: center;
+            ">
+                <span style="color: #666; font-size: 1rem;">Total de unidades hoy</span>
+                <h2 style="color: #667eea; margin: 0; font-size: 2.5rem;">{total_registro}</h2>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Botón de guardar moderno
+            col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+            with col_btn2:
+                if st.button("💾 GUARDAR REGISTRO", key="btn_guardar", use_container_width=True):
+                    if total_registro > 0:
+                        conn = get_connection()
+                        c = conn.cursor()
+                        c.execute("""
+                            INSERT INTO registros_ventas
+                            (fecha, empleado, autoliquidable, oferta, marca_propia, producto_adicional)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        """, (fecha, empleado_nombre, autoliquidable, oferta, marca_propia, producto_adicional))
+                        conn.commit()
+                        conn.close()
+                        
+                        st.success("✅ ¡Ventas registradas exitosamente!")
+                        st.balloons()
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Debes registrar al menos una venta")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
     
-    with col2:
-        # Mostrar registros del día
-        st.subheader("📊 Registros de Hoy")
+    with col_resumen:
+        # Resumen del día
+        st.markdown("""
+        <div class="form-card animate-in" style="margin-bottom: 1rem;">
+            <div class="form-title" style="font-size: 1.2rem;">
+                📊 Resumen de Hoy
+            </div>
+        """, unsafe_allow_html=True)
         
         hoy = datetime.now().date()
         conn = get_connection()
         df_hoy = pd.read_sql("""
-            SELECT autoliquidable, oferta, marca_propia, producto_adicional, fecha_registro
+            SELECT autoliquidable, oferta, marca_propia, producto_adicional
             FROM registros_ventas 
             WHERE empleado = ? AND fecha = ?
-            ORDER BY fecha_registro DESC
         """, conn, params=(empleado_nombre, hoy))
         conn.close()
         
@@ -567,39 +875,110 @@ def pagina_registro_ventas():
             total_ofer = df_hoy['oferta'].sum()
             total_marca = df_hoy['marca_propia'].sum()
             total_prod = df_hoy['producto_adicional'].sum()
+            total_general = total_auto + total_ofer + total_marca + total_prod
             
-            col_t1, col_t2 = st.columns(2)
-            with col_t1:
-                st.metric("Autoliquidable", int(total_auto))
-                st.metric("Marca Propia", int(total_marca))
-            with col_t2:
-                st.metric("Oferta", int(total_ofer))
-                st.metric("Producto Adic.", int(total_prod))
+            # Métricas en tarjetas modernas
+            col_m1, col_m2 = st.columns(2)
             
-            with st.expander("Ver detalles"):
-                st.dataframe(df_hoy, use_container_width=True)
+            with col_m1:
+                st.markdown(f"""
+                <div class="metric-card-modern">
+                    <div class="metric-icon">💊</div>
+                    <p class="metric-value-modern">{int(total_auto)}</p>
+                    <p class="metric-label-modern">Autoliquidable</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown(f"""
+                <div class="metric-card-modern">
+                    <div class="metric-icon">⭐</div>
+                    <p class="metric-value-modern">{int(total_marca)}</p>
+                    <p class="metric-label-modern">Marca Propia</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            with col_m2:
+                st.markdown(f"""
+                <div class="metric-card-modern">
+                    <div class="metric-icon">🏷️</div>
+                    <p class="metric-value-modern">{int(total_ofer)}</p>
+                    <p class="metric-label-modern">Oferta</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown(f"""
+                <div class="metric-card-modern">
+                    <div class="metric-icon">➕</div>
+                    <p class="metric-value-modern">{int(total_prod)}</p>
+                    <p class="metric-label-modern">Adicional</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Total general
+            st.markdown(f"""
+            <div style="
+                background: linear-gradient(135deg, #00aa0020 0%, #00cc0020 100%);
+                padding: 1rem;
+                border-radius: 12px;
+                margin-top: 1rem;
+                text-align: center;
+            ">
+                <span style="color: #00aa00; font-size: 1rem;">TOTAL DEL DÍA</span>
+                <h2 style="color: #00aa00; margin: 0; font-size: 2rem;">{int(total_general)}</h2>
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            st.info("📭 No has registrado ventas hoy")
-    
-    # Registros recientes
-    st.markdown("---")
-    st.subheader("📈 Mis Últimos Registros")
-    
-    conn = get_connection()
-    df_recientes = pd.read_sql("""
-        SELECT fecha, autoliquidable, oferta, marca_propia, producto_adicional, 
-               (autoliquidable + oferta + marca_propia + producto_adicional) as total
-        FROM registros_ventas 
-        WHERE empleado = ? 
-        ORDER BY fecha DESC, fecha_registro DESC 
-        LIMIT 10
-    """, conn, params=(empleado_nombre,))
-    conn.close()
-    
-    if not df_recientes.empty:
-        st.dataframe(df_recientes, use_container_width=True, hide_index=True)
-    else:
-        st.info("📭 No tienes registros anteriores")
+            st.info("""
+            <div style="text-align: center; padding: 2rem;">
+                <span style="font-size: 3rem;">📭</span>
+                <p style="color: #666;">No hay registros hoy</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Últimos registros
+        st.markdown("""
+        <div class="form-card animate-in">
+            <div class="form-title" style="font-size: 1.2rem;">
+                📋 Últimos Registros
+            </div>
+        """, unsafe_allow_html=True)
+        
+        conn = get_connection()
+        df_recientes = pd.read_sql("""
+            SELECT fecha, autoliquidable, oferta, marca_propia, producto_adicional,
+                   (autoliquidable + oferta + marca_propia + producto_adicional) as total
+            FROM registros_ventas 
+            WHERE empleado = ? 
+            ORDER BY fecha DESC, fecha_registro DESC 
+            LIMIT 5
+        """, conn, params=(empleado_nombre,))
+        conn.close()
+        
+        if not df_recientes.empty:
+            for _, row in df_recientes.iterrows():
+                fecha_str = datetime.strptime(row['fecha'], '%Y-%m-%d').strftime('%d/%m/%Y')
+                st.markdown(f"""
+                <div class="history-card" style="border-left-color: #667eea;">
+                    <div class="history-date">{fecha_str}</div>
+                    <div class="history-values">
+                        <span class="history-tag"><strong>💊</strong> {int(row['autoliquidable'])}</span>
+                        <span class="history-tag"><strong>🏷️</strong> {int(row['oferta'])}</span>
+                        <span class="history-tag"><strong>⭐</strong> {int(row['marca_propia'])}</span>
+                        <span class="history-tag"><strong>➕</strong> {int(row['producto_adicional'])}</span>
+                        <span class="history-tag"><strong>📊</strong> {int(row['total'])}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div style="text-align: center; padding: 2rem;">
+                <p style="color: #999;">No hay registros anteriores</p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # -------------------- PÁGINAS EXISTENTES (modificadas con permisos) --------------------
 def pagina_empleados():
