@@ -97,7 +97,7 @@ def create_tables():
 
 create_tables()
 
-# -------------------- FUNCIONES PARA EMPLEADOS (ACTUALIZADAS) --------------------
+# -------------------- FUNCIONES PARA EMPLEADOS --------------------
 def cargar_empleados_db():
     """Carga los nombres de empleados desde la base de datos"""
     conn = get_connection()
@@ -220,13 +220,9 @@ def inicializar_estado():
     """Inicializa todas las variables de sesión"""
     if 'empleados' not in st.session_state:
         st.session_state.empleados = cargar_empleados_db()
-    else:
-        # Recargar empleados cada cierto tiempo o cuando sea necesario
-        if 'ultima_recarga' not in st.session_state:
-            st.session_state.ultima_recarga = datetime.now()
-        elif (datetime.now() - st.session_state.ultima_recarga).seconds > 30:
-            st.session_state.empleados = cargar_empleados_db()
-            st.session_state.ultima_recarga = datetime.now()
+    
+    if 'menu_visible' not in st.session_state:
+        st.session_state.menu_visible = True
     
     if 'config' not in st.session_state:
         st.session_state.config = cargar_config()
@@ -633,108 +629,98 @@ def pagina_dashboard():
     else:
         st.info("📭 Aún no hay datos registrados")
 
-# -------------------- UI PRINCIPAL - MENÚ CON BOTONES --------------------
-# Estilo personalizado
-st.markdown("""
-<style>
-    /* Estilo para los botones del menú */
-    div[data-testid="column"] button {
-        height: 80px;
-        font-size: 18px;
-        font-weight: bold;
-        border-radius: 10px;
-        margin: 5px 0;
-        transition: all 0.3s;
-    }
+# -------------------- MENÚ LATERAL --------------------
+with st.sidebar:
+    # Botón para ocultar/mostrar menú
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown("### 📋 Menú")
+    with col2:
+        if st.button("🔽" if st.session_state.menu_visible else "▶️", key="toggle_menu"):
+            st.session_state.menu_visible = not st.session_state.menu_visible
+            st.rerun()
     
-    div[data-testid="column"] button:hover {
-        transform: scale(1.02);
-        border-color: #ff4b4b;
-    }
+    st.markdown("---")
     
-    /* Estilo para el botón activo */
-    .boton-activo {
-        background-color: #ff4b4b !important;
-        color: white !important;
-        border-color: #ff4b4b !important;
-    }
+    # Mostrar información del usuario en el sidebar
+    deptos_df = obtener_empleados_por_departamento()
+    deptos_text = ""
+    if not deptos_df.empty:
+        deptos_text = " • ".join([f"{row['departamento']}: {row['cantidad']}" for _, row in deptos_df.iterrows()])
     
-    /* Estilo para el header */
-    .header-info {
+    st.markdown(f"""
+    <div style="
         background-color: #f0f2f6;
         padding: 10px;
         border-radius: 10px;
         margin-bottom: 20px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# Header con información
-col_hora, col_titulo, col_usuario = st.columns([1, 2, 1])
-
-with col_hora:
-    st.markdown(f"""
-    <div class="header-info">
-        <strong>{datetime.now().strftime('%H:%M')}</strong><br>
-        {datetime.now().strftime('%d/%m • %A')}
-    </div>
-    """, unsafe_allow_html=True)
-
-with col_titulo:
-    st.markdown("""
-    <div class="header-info" style="text-align: center;">
-        <h2>🏢 Locatel Restrepo</h2>
-    </div>
-    """, unsafe_allow_html=True)
-
-# En el header, después de mostrar el total de empleados, agregar:
-with col_usuario:
-    # Obtener conteo por departamento para mostrar
-    deptos_df = obtener_empleados_por_departamento()
-    deptos_text = ""
-    if not deptos_df.empty:
-        deptos_text = "<br>".join([f"{row['departamento']}: {row['cantidad']}" for _, row in deptos_df.iterrows()])
-    
-    st.markdown(f"""
-    <div class="header-info" style="text-align: right;">
+    ">
         <strong>👤 {st.session_state.usuario_actual}</strong><br>
+        <small>{datetime.now().strftime('%H:%M')} - {datetime.now().strftime('%d/%m')}</small><br>
         <small>Total: {len(st.session_state.empleados)} empleados</small><br>
         <small style="font-size: 0.8em;">{deptos_text}</small>
     </div>
     """, unsafe_allow_html=True)
-
-# Menú con botones en recuadros
-st.markdown("### 📋 Menú Principal")
-st.markdown("---")
-
-# Crear 6 columnas para los 6 botones
-col1, col2, col3, col4, col5, col6 = st.columns(6)
-
-# Función para crear botones de menú
-def crear_boton_menu(col, nombre, icono, pagina):
-    with col:
-        # Determinar si es la página actual
-        es_activo = st.session_state.pagina_actual == pagina
+    
+    # Menú de navegación (visible u oculto)
+    if st.session_state.menu_visible:
+        # Definir las opciones del menú
+        menu_options = {
+            "Empleados": "👥",
+            "Dashboard": "📊",
+            "Config": "⚙️",
+            "Usuarios": "👤",
+            "Backup": "💾",
+            "Sistema": "🖥️"
+        }
         
-        # Clase CSS para botón activo
-        clase = "boton-activo" if es_activo else ""
+        # Crear botones para cada opción
+        for opcion, icono in menu_options.items():
+            # Determinar si es la página actual
+            es_activo = st.session_state.pagina_actual == opcion
+            
+            # Estilo para botón activo
+            if es_activo:
+                button_type = "primary"
+            else:
+                button_type = "secondary"
+            
+            if st.button(
+                f"{icono} {opcion}",
+                key=f"menu_{opcion}",
+                use_container_width=True,
+                type=button_type
+            ):
+                st.session_state.pagina_actual = opcion
+                st.rerun()
         
-        # Crear botón
-        if st.button(f"{icono}\n{nombre}", key=f"btn_{pagina}", use_container_width=True):
-            st.session_state.pagina_actual = pagina
-            st.rerun()
+        st.markdown("---")
+        st.caption("© 2024 Locatel Restrepo")
+    else:
+        # Mostrar solo íconos cuando el menú está oculto
+        st.markdown("### ")
+        cols = st.columns(1)
+        with cols[0]:
+            # Versión mini con solo íconos
+            menu_icons = {
+                "Empleados": "👥",
+                "Dashboard": "📊", 
+                "Config": "⚙️",
+                "Usuarios": "👤",
+                "Backup": "💾",
+                "Sistema": "🖥️"
+            }
+            
+            for opcion, icono in menu_icons.items():
+                if st.button(icono, key=f"mini_{opcion}", help=opcion):
+                    st.session_state.pagina_actual = opcion
+                    st.rerun()
 
-# Crear los botones del menú
-crear_boton_menu(col1, "Empleados", "👥", "Empleados")
-crear_boton_menu(col2, "Dashboard", "📊", "Dashboard")
-crear_boton_menu(col3, "Config", "⚙️", "Config")
-crear_boton_menu(col4, "Usuarios", "👤", "Usuarios")
-crear_boton_menu(col5, "Backup", "💾", "Backup")
-crear_boton_menu(col6, "Sistema", "🖥️", "Sistema")
+# -------------------- CONTENIDO PRINCIPAL --------------------
+# Mostrar el título de la página actual
+st.markdown(f"# {st.session_state.pagina_actual}")
 
-st.markdown("---")
-
-# -------------------- NAVEGACIÓN --------------------
+# Navegación
 if st.session_state.pagina_actual == "Empleados":
     pagina_empleados()
 elif st.session_state.pagina_actual == "Dashboard":
