@@ -30,33 +30,37 @@ def create_table():
 
 create_table()
 
-# -------------------- LISTA DE EMPLEADOS --------------------
-empleados = [
-    "Angel Bonilla",
-    "Claudia Parada",
-    "Cristina Gomez",
-    "Daniela Velasco",
-    "Darcy Tovar",
-    "Erika Salazar",
-    "Estheiry Cardozo",
-    "Janeth Jimenez",
-    "Jessica Sanabria",
-    "Johanna Cuervo",
-    "Leonardo Vera",
-    "Lucia Guerrero",
-    "Luna Galindez",
-    "Mariana Mejia",
-    "Niyireth Silva",
-    "Ruth Avila",
-    "Valeria Delgado",
-]
+# -------------------- INICIALIZAR ESTADO DE LA SESIÓN --------------------
+def inicializar_empleados():
+    """Inicializa la lista de empleados en session_state si no existe"""
+    if 'empleados' not in st.session_state:
+        st.session_state.empleados = [
+            "Angel Bonilla",
+            "Claudia Parada",
+            "Cristina Gomez",
+            "Daniela Velasco",
+            "Darcy Tovar",
+            "Erika Salazar",
+            "Estheiry Cardozo",
+            "Janeth Jimenez",
+            "Jessica Sanabria",
+            "Johanna Cuervo",
+            "Leonardo Vera",
+            "Lucia Guerrero",
+            "Luna Galindez",
+            "Mariana Mejia",
+            "Niyireth Silva",
+            "Ruth Avila",
+            "Valeria Delgado",
+        ]
+
+# Llamar a la función para inicializar
+inicializar_empleados()
 
 # -------------------- FUNCIONES DE PÁGINAS --------------------
 def pagina_malla():
     st.title("📊 Malla")
-    st.info("Aquí va el contenido de Malla")
     
-    # Aquí puedes poner el dashboard actual o lo que necesites
     conn = get_connection()
     df = pd.read_sql("SELECT * FROM registros_ventas", conn)
     conn.close()
@@ -69,6 +73,10 @@ def pagina_malla():
         col4.metric("Producto Adicional", int(df["producto_adicional"].sum()))
         
         st.bar_chart(df.groupby("empleado")[["autoliquidable","oferta","marca_propia","producto_adicional"]].sum())
+        
+        # Mostrar datos recientes
+        st.subheader("📋 Ventas Recientes")
+        st.dataframe(df.sort_values("fecha", ascending=False).head(10), use_container_width=True)
     else:
         st.info("Aún no hay datos registrados")
 
@@ -78,9 +86,9 @@ def pagina_empleados():
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("Registro Diario de Ventas")
+        st.subheader("📝 Registro Diario de Ventas")
         fecha = st.date_input("📅 Fecha", key="fecha_registro")
-        empleado = st.selectbox("👤 Nombre", empleados, key="empleado_select")
+        empleado = st.selectbox("👤 Nombre", st.session_state.empleados, key="empleado_select")
         
         autoliquidable = st.number_input("Autoliquidable", min_value=0, step=1, key="auto")
         oferta = st.number_input("Oferta de la semana", min_value=0, step=1, key="ofer")
@@ -98,22 +106,42 @@ def pagina_empleados():
             conn.commit()
             conn.close()
             st.success("✅ Registro guardado")
+            st.rerun()
     
     with col2:
-        st.subheader("Lista de Empleados")
-        for i, emp in enumerate(empleados, 1):
+        st.subheader("📋 Lista de Empleados")
+        
+        # Mostrar lista actual
+        for i, emp in enumerate(st.session_state.empleados, 1):
             st.write(f"{i}. {emp}")
         
-        # Opción para agregar empleados (simple)
-        with st.expander("➕ Agregar nuevo empleado"):
+        st.divider()
+        
+        # Opción para agregar empleados
+        with st.expander("➕ Agregar nuevo empleado", expanded=True):
             nuevo_empleado = st.text_input("Nombre del nuevo empleado")
-            if st.button("Agregar"):
-                if nuevo_empleado and nuevo_empleado not in empleados:
-                    empleados.append(nuevo_empleado)
-                    st.success(f"✅ {nuevo_empleado} agregado")
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("Agregar", use_container_width=True):
+                    if nuevo_empleado and nuevo_empleado not in st.session_state.empleados:
+                        st.session_state.empleados.append(nuevo_empleado)
+                        st.success(f"✅ {nuevo_empleado} agregado")
+                        st.rerun()
+                    elif not nuevo_empleado:
+                        st.error("❌ El nombre no puede estar vacío")
+                    else:
+                        st.error("❌ El empleado ya existe")
+        
+        # Opción para eliminar empleados
+        with st.expander("➖ Eliminar empleado"):
+            empleado_a_eliminar = st.selectbox("Seleccionar empleado", st.session_state.empleados, key="eliminar_emp")
+            if st.button("Eliminar", use_container_width=True):
+                if len(st.session_state.empleados) > 1:
+                    st.session_state.empleados.remove(empleado_a_eliminar)
+                    st.success(f"✅ {empleado_a_eliminar} eliminado")
                     st.rerun()
                 else:
-                    st.error("El empleado ya existe o el nombre está vacío")
+                    st.error("❌ No puedes eliminar el último empleado")
 
 def pagina_config():
     st.title("⚙️ Configuración")
@@ -143,11 +171,11 @@ def pagina_usuarios():
     tab1, tab2, tab3 = st.tabs(["Usuarios activos", "Agregar usuario", "Permisos"])
     
     with tab1:
-        st.dataframe({
+        st.dataframe(pd.DataFrame({
             "Usuario": ["admin", "usuario1", "usuario2"],
             "Rol": ["Administrador", "Vendedor", "Vendedor"],
             "Último acceso": ["2026-02-13", "2026-02-12", "2026-02-11"]
-        })
+        }), use_container_width=True)
     
     with tab2:
         st.text_input("Nombre de usuario")
@@ -179,25 +207,30 @@ def pagina_sistema():
     
     st.subheader("Información del sistema")
     
+    conn = get_connection()
+    df = pd.read_sql("SELECT COUNT(*) as total FROM registros_ventas", conn)
+    total_registros = df['total'].iloc[0] if not df.empty else 0
+    conn.close()
+    
     col1, col2 = st.columns(2)
     
     with col1:
         st.metric("Versión", "1.0.0")
         st.metric("Base de datos", "SQLite")
-        st.metric("Registros totales", "150")
+        st.metric("Registros totales", total_registros)
     
     with col2:
-        st.metric("Última actualización", "2026-02-13")
-        st.metric("Espacio usado", "2.3 MB")
+        st.metric("Última actualización", datetime.now().strftime("%Y-%m-%d"))
+        st.metric("Empleados activos", len(st.session_state.empleados))
         st.metric("Estado", "✅ Online")
     
     st.subheader("Logs del sistema")
     st.text_area("Registro de actividades", 
-                 "2026-02-13 20:04: Usuario admin inició sesión\n2026-02-13 19:30: Backup automático completado",
+                 f"{datetime.now().strftime('%Y-%m-%d %H:%M')}: Sistema iniciado\n{datetime.now().strftime('%Y-%m-%d %H:%M')}: {len(st.session_state.empleados)} empleados cargados",
                  height=150)
 
 # -------------------- UI PRINCIPAL --------------------
-# Estilo personalizado para el menú
+# Estilo personalizado
 st.markdown("""
 <style>
     /* Estilo para el menú lateral */
@@ -227,7 +260,7 @@ with col_hora:
 with col_menu:
     st.markdown("### Admin")
 
-# Menú lateral con las opciones de la imagen
+# Menú lateral
 with st.sidebar:
     st.markdown("## 🏢 Locatel Restrepo")
     st.divider()
