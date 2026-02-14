@@ -30,31 +30,31 @@ def create_table():
 
 create_table()
 
-# -------------------- LISTA DE EMPLEADOS (MODIFICABLE DIRECTAMENTE) --------------------
-# 🔧 ¡MODIFICA ESTA LISTA DIRECTAMENTE!
-# Agrega, elimina o cambia los nombres aquí abajo
+# -------------------- LISTA DE EMPLEADOS --------------------
+# 👇 AGREGA NUEVOS EMPLEADOS AQUÍ ABAJO 👇
 empleados = [
-    "Angel Bonilla",      # ← Modifica este nombre
-    "Claudia Parada",     # ← Modifica este nombre
-    "Cristina Gomez",     # ← Modifica este nombre
-    "Daniela Velasco",    # ← Modifica este nombre
-    "Darcy Tovar",        # ← Modifica este nombre
-    "Erika Salazar",      # ← Modifica este nombre
-    "Estheiry Cardozo",   # ← Modifica este nombre
-    "Janeth Jimenez",     # ← Modifica este nombre
-    "Jessica Sanabria",   # ← Modifica este nombre
-    "Johanna Cuervo",     # ← Modifica este nombre
-    "Leonardo Vera",      # ← Modifica este nombre
-    "Lucia Guerrero",     # ← Modifica este nombre
-    "Luna Galindez",      # ← Modifica este nombre
-    "Mariana Mejia",      # ← Modifica este nombre
-    "Niyireth Silva",     # ← Modifica este nombre
-    "Ruth Avila",         # ← Modifica este nombre
-    "Valeria Delgado"     # ← Modifica este nombre
+    "Angel Bonilla",
+    "Claudia Parada",
+    "Cristina Gomez",
+    "Daniela Velasco",
+    "Darcy Tovar",
+    "Erika Salazar",
+    "Estheiry Cardozo",
+    "Janeth Jimenez",
+    "Jessica Sanabria",
+    "Johanna Cuervo",
+    "Leonardo Vera",
+    "Lucia Guerrero",
+    "Luna Galindez",
+    "Mariana Mejia",
+    "Niyireth Silva",
+    "Ruth Avila",
+    "Valeria Delgado",
+    # 👇 AGREGA NUEVOS EMPLEADOS DEBAJO DE ESTA LÍNEA 👇
+    # "Nuevo Empleado 1",  # Ejemplo: quita el # y escribe el nombre
+    # "Nuevo Empleado 2",  # Ejemplo: quita el # y escribe el nombre
+    # "Nuevo Empleado 3",  # Ejemplo: quita el # y escribe el nombre
 ]
-
-# Si quieres agregar más nombres, solo añádelos aquí:
-# "Nuevo Empleado",    ← Agrega aquí (no olvides la coma al final)
 
 # -------------------- UI --------------------
 st.title("📊 Equipo Locatel Restrepo")
@@ -110,8 +110,9 @@ if menu == "📋 Ver Registros":
 
     st.dataframe(df, use_container_width=True)
 
-    excel = df.to_excel(index=False, engine='openpyxl')
-    st.download_button("📥 Descargar Excel", excel, "ventas_locatel.xlsx")
+    if not df.empty:
+        excel = df.to_excel(index=False, engine='openpyxl')
+        st.download_button("📥 Descargar Excel", excel, "ventas_locatel.xlsx")
 
 # -------------------- DASHBOARD --------------------
 if menu == "📈 Dashboard":
