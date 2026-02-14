@@ -1031,7 +1031,7 @@ else:
         pagina_login()
     elif st.session_state.pagina_actual == "Registro Ventas":
         pagina_registro_ventas()
-    elif st.session_state.pagina_actual == "Empleados":b
+    elif st.session_state.pagina_actual == "Empleados":
         pagina_empleados()
     elif st.session_state.pagina_actual == "Dashboard":
         pagina_dashboard()
