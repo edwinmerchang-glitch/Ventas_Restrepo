@@ -163,6 +163,13 @@ def inicializar_estado():
     """Inicializa todas las variables de sesión"""
     if 'empleados' not in st.session_state:
         st.session_state.empleados = cargar_empleados_db()
+    else:
+        # Recargar empleados cada cierto tiempo o cuando sea necesario
+        if 'ultima_recarga' not in st.session_state:
+            st.session_state.ultima_recarga = datetime.now()
+        elif (datetime.now() - st.session_state.ultima_recarga).seconds > 30:
+            st.session_state.empleados = cargar_empleados_db()
+            st.session_state.ultima_recarga = datetime.now()
     
     if 'config' not in st.session_state:
         st.session_state.config = cargar_config()
@@ -220,7 +227,7 @@ def pagina_empleados():
             conn.commit()
             conn.close()
             st.success("✅ Registro guardado")
-            st.rerun()
+             st.session_state.empleados = cargar_empleados_db()  # Recarga datos si es necesario
         else:
             st.error("❌ No hay empleados para registrar ventas")
 
