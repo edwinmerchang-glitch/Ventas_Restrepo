@@ -8,12 +8,14 @@ from datetime import datetime
 # -------------------- CONFIG --------------------
 st.set_page_config(page_title="Equipo Locatel Restrepo", layout="wide")
 
-# Configuración para desarrollo - EVITA EL CACHÉ
-import sys
-if "streamlit run" in " ".join(sys.argv):
-    os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "poll"
-    os.environ["STREAMLIT_SERVER_RUN_ON_SAVE"] = "true"
-    os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
+# ---------- CONTROL DE CACHE ----------
+import streamlit as st
+
+if st.sidebar.button("🔄 Reiniciar App"):
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    st.rerun()
+
 
 # -------------------- DB --------------------
 def get_connection():
