@@ -30,24 +30,23 @@ def create_tables():
         )
     """)
     
-    # Tabla de empleados (con departamento)
+    # Tabla de empleados
     c.execute("""
         CREATE TABLE IF NOT EXISTS empleados (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nombre TEXT UNIQUE,
-            departamento TEXT DEFAULT 'Droguería',
             activo INTEGER DEFAULT 1,
             fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     
-    # Verificar si la columna departamento existe, si no, agregarla
+    # Agregar columna departamento si no existe
     try:
         c.execute("ALTER TABLE empleados ADD COLUMN departamento TEXT DEFAULT 'Droguería'")
     except:
         pass  # La columna ya existe
     
-    # Tabla de usuarios del sistema
+    # Tabla de usuarios
     c.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,7 +58,7 @@ def create_tables():
         )
     """)
     
-    # Insertar empleados por defecto si no existen (con departamento)
+    # Insertar empleados por defecto con departamento
     empleados_default = [
         ("Angel Bonilla", "Droguería"),
         ("Claudia Parada", "Droguería"),
@@ -86,7 +85,7 @@ def create_tables():
         except:
             pass
     
-    # Insertar usuario admin por defecto
+    # Insertar usuario admin
     try:
         c.execute("INSERT OR IGNORE INTO usuarios (username, password, rol) VALUES (?, ?, ?)",
                   ("admin", "admin123", "Administrador"))
@@ -100,14 +99,11 @@ create_tables()
 
 # -------------------- FUNCIONES PARA EMPLEADOS (ACTUALIZADAS) --------------------
 def cargar_empleados_db():
-    """Carga los empleados desde la base de datos"""
+    """Carga los nombres de empleados desde la base de datos"""
     conn = get_connection()
-    df = pd.read_sql("SELECT nombre, departamento FROM empleados WHERE activo = 1 ORDER BY nombre", conn)
+    df = pd.read_sql("SELECT nombre FROM empleados WHERE activo = 1 ORDER BY nombre", conn)
     conn.close()
-    if not df.empty:
-        # Devolver lista de nombres para compatibilidad con código existente
-        return df['nombre'].tolist()
-    return []
+    return df['nombre'].tolist() if not df.empty else []
 
 def cargar_empleados_con_departamento():
     """Carga los empleados con su departamento"""
@@ -121,10 +117,28 @@ def guardar_empleado_db(nombre, departamento):
     conn = get_connection()
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO empleados (nombre, departamento) VALUES (?, ?)", (nombre, departamento))
-        conn.commit()
-        return True
+        # Verificar si el empleado ya existe (activo o inactivo)
+        c.execute("SELECT activo FROM empleados WHERE nombre = ?", (nombre,))
+        resultado = c.fetchone()
+        
+        if resultado:
+            if resultado[0] == 0:
+                # Si existe pero está inactivo, lo reactivamos
+                c.execute("UPDATE empleados SET activo = 1, departamento = ? WHERE nombre = ?", (departamento, nombre))
+                conn.commit()
+                return True
+            else:
+                # Si existe y está activo
+                return False
+        else:
+            # Si no existe, lo insertamos
+            c.execute("INSERT INTO empleados (nombre, departamento, activo) VALUES (?, ?, 1)", (nombre, departamento))
+            conn.commit()
+            return True
     except sqlite3.IntegrityError:
+        return False
+    except Exception as e:
+        st.error(f"Error: {e}")
         return False
     finally:
         conn.close()
@@ -282,6 +296,7 @@ def pagina_empleados():
                 conn.commit()
                 conn.close()
                 st.success("✅ Registro guardado")
+                st.rerun()
             else:
                 st.error("❌ No hay empleados para registrar ventas")
     
@@ -292,6 +307,8 @@ def pagina_empleados():
         
         with col_agregar:
             st.markdown("**➕ Agregar Nuevo Empleado**")
+            
+            # Formulario para agregar empleado
             with st.form("form_agregar_empleado"):
                 nuevo_empleado = st.text_input("Nombre completo del empleado")
                 departamento = st.selectbox(
@@ -300,8 +317,11 @@ def pagina_empleados():
                     key="depto_nuevo"
                 )
                 
-                if st.form_submit_button("Agregar empleado", use_container_width=True):
+                submitted = st.form_submit_button("Agregar empleado", use_container_width=True)
+                
+                if submitted:
                     if nuevo_empleado:
+                        # Llamar a la función con ambos parámetros
                         if guardar_empleado_db(nuevo_empleado, departamento):
                             st.success(f"✅ Empleado '{nuevo_empleado}' agregado al departamento {departamento}")
                             # Actualizar la lista de empleados en el estado
@@ -315,22 +335,24 @@ def pagina_empleados():
         with col_lista:
             st.markdown("**📋 Lista de Empleados Activos**")
             
+            # Cargar empleados con departamento
             empleados_df = cargar_empleados_con_departamento()
             
             if not empleados_df.empty:
-                # Mostrar empleados en una tabla con departamento
+                # Mostrar empleados en una tabla
                 for i, row in empleados_df.iterrows():
                     col_emp, col_depto, col_btn = st.columns([3, 2, 1])
                     with col_emp:
                         st.write(f"• {row['nombre']}")
                     with col_depto:
-                        depto_color = {
+                        # Asignar color según departamento
+                        color = {
                             "Droguería": "🔵",
                             "Equipos Médicos": "🟢",
                             "Tienda": "🟠",
                             "Cajas": "🟣"
                         }.get(row['departamento'], "⚪")
-                        st.write(f"{depto_color} {row['departamento']}")
+                        st.write(f"{color} {row['departamento']}")
                     with col_btn:
                         if st.button("🗑️", key=f"eliminar_{i}", help=f"Eliminar a {row['nombre']}"):
                             eliminar_empleado_db(row['nombre'])
@@ -341,19 +363,17 @@ def pagina_empleados():
             else:
                 st.info("📭 No hay empleados registrados")
         
-        # Mostrar estadísticas de empleados
+        # Mostrar estadísticas
         st.markdown("---")
         st.subheader("📊 Estadísticas de Empleados")
         
         col_total, col_activos = st.columns(2)
         
         with col_total:
-            # Contar total de empleados (incluyendo inactivos)
             conn = get_connection()
             df_total = pd.read_sql("SELECT COUNT(*) as total FROM empleados", conn)
             total_empleados = df_total['total'].iloc[0] if not df_total.empty else 0
             conn.close()
-            
             st.metric("Total empleados (histórico)", total_empleados)
         
         with col_activos:
