@@ -58,28 +58,6 @@ def inicializar_empleados():
 inicializar_empleados()
 
 # -------------------- FUNCIONES DE PÁGINAS --------------------
-def pagina_malla():
-    st.title("📊 Malla")
-    
-    conn = get_connection()
-    df = pd.read_sql("SELECT * FROM registros_ventas", conn)
-    conn.close()
-    
-    if not df.empty:
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Autoliquidable", int(df["autoliquidable"].sum()))
-        col2.metric("Oferta", int(df["oferta"].sum()))
-        col3.metric("Marca Propia", int(df["marca_propia"].sum()))
-        col4.metric("Producto Adicional", int(df["producto_adicional"].sum()))
-        
-        st.bar_chart(df.groupby("empleado")[["autoliquidable","oferta","marca_propia","producto_adicional"]].sum())
-        
-        # Mostrar datos recientes
-        st.subheader("📋 Ventas Recientes")
-        st.dataframe(df.sort_values("fecha", ascending=False).head(10), use_container_width=True)
-    else:
-        st.info("Aún no hay datos registrados")
-
 def pagina_empleados():
     st.title("👥 Empleados")
     
@@ -229,6 +207,28 @@ def pagina_sistema():
                  f"{datetime.now().strftime('%Y-%m-%d %H:%M')}: Sistema iniciado\n{datetime.now().strftime('%Y-%m-%d %H:%M')}: {len(st.session_state.empleados)} empleados cargados",
                  height=150)
 
+def pagina_dashboard():
+    st.title("📊 Dashboard de Ventas")
+    
+    conn = get_connection()
+    df = pd.read_sql("SELECT * FROM registros_ventas", conn)
+    conn.close()
+    
+    if not df.empty:
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Autoliquidable", int(df["autoliquidable"].sum()))
+        col2.metric("Oferta", int(df["oferta"].sum()))
+        col3.metric("Marca Propia", int(df["marca_propia"].sum()))
+        col4.metric("Producto Adicional", int(df["producto_adicional"].sum()))
+        
+        st.bar_chart(df.groupby("empleado")[["autoliquidable","oferta","marca_propia","producto_adicional"]].sum())
+        
+        # Mostrar datos recientes
+        st.subheader("📋 Ventas Recientes")
+        st.dataframe(df.sort_values("fecha", ascending=False).head(10), use_container_width=True)
+    else:
+        st.info("Aún no hay datos registrados")
+
 # -------------------- UI PRINCIPAL --------------------
 # Estilo personalizado
 st.markdown("""
@@ -260,14 +260,14 @@ with col_hora:
 with col_menu:
     st.markdown("### Admin")
 
-# Menú lateral
+# Menú lateral - SIN LA OPCIÓN "Malla"
 with st.sidebar:
     st.markdown("## 🏢 Locatel Restrepo")
     st.divider()
     
     opcion = st.radio(
         "Menú",
-        ["Malla", "Empleados", "Config", "Usuarios", "Backup", "Sistema"],
+        ["Empleados", "Dashboard", "Config", "Usuarios", "Backup", "Sistema"],
         label_visibility="collapsed"
     )
     
@@ -276,10 +276,10 @@ with st.sidebar:
     st.caption(f"Último acceso: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
 # -------------------- NAVEGACIÓN --------------------
-if opcion == "Malla":
-    pagina_malla()
-elif opcion == "Empleados":
+if opcion == "Empleados":
     pagina_empleados()
+elif opcion == "Dashboard":
+    pagina_dashboard()
 elif opcion == "Config":
     pagina_config()
 elif opcion == "Usuarios":
