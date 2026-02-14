@@ -170,6 +170,9 @@ def inicializar_estado():
     if 'usuario_actual' not in st.session_state:
         st.session_state.usuario_actual = "admin"
         actualizar_ultimo_acceso("admin")
+    
+    if 'pagina_actual' not in st.session_state:
+        st.session_state.pagina_actual = "Empleados"
 
 # Llamar a la función para inicializar
 inicializar_estado()
@@ -437,56 +440,109 @@ def pagina_dashboard():
     else:
         st.info("📭 Aún no hay datos registrados")
 
-# -------------------- UI PRINCIPAL --------------------
+# -------------------- UI PRINCIPAL - MENÚ CON BOTONES --------------------
 # Estilo personalizado
 st.markdown("""
 <style>
-    .css-1d391kg { padding-top: 1rem; }
-    .stRadio > div { padding: 0.5rem; }
-    .stRadio [role="radiogroup"] { gap: 0.5rem; }
-    .stButton button { width: 100%; }
+    /* Estilo para los botones del menú */
+    div[data-testid="column"] button {
+        height: 80px;
+        font-size: 18px;
+        font-weight: bold;
+        border-radius: 10px;
+        margin: 5px 0;
+        transition: all 0.3s;
+    }
+    
+    div[data-testid="column"] button:hover {
+        transform: scale(1.02);
+        border-color: #ff4b4b;
+    }
+    
+    /* Estilo para el botón activo */
+    .boton-activo {
+        background-color: #ff4b4b !important;
+        color: white !important;
+        border-color: #ff4b4b !important;
+    }
+    
+    /* Estilo para el header */
+    .header-info {
+        background-color: #f0f2f6;
+        padding: 10px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# Menú superior con la hora
-col_hora, col_menu, col_usuario = st.columns([1, 3, 1])
+# Header con información
+col_hora, col_titulo, col_usuario = st.columns([1, 2, 1])
 
 with col_hora:
-    st.markdown(f"**{datetime.now().strftime('%H:%M')}**")
-    st.markdown(f"{datetime.now().strftime('%d/%m • %A')}")
+    st.markdown(f"""
+    <div class="header-info">
+        <strong>{datetime.now().strftime('%H:%M')}</strong><br>
+        {datetime.now().strftime('%d/%m • %A')}
+    </div>
+    """, unsafe_allow_html=True)
 
-with col_menu:
-    st.markdown("### 🏢 Locatel Restrepo")
+with col_titulo:
+    st.markdown("""
+    <div class="header-info" style="text-align: center;">
+        <h2>🏢 Locatel Restrepo</h2>
+    </div>
+    """, unsafe_allow_html=True)
 
 with col_usuario:
-    st.markdown(f"**👤 {st.session_state.usuario_actual}**")
+    st.markdown(f"""
+    <div class="header-info" style="text-align: right;">
+        <strong>👤 {st.session_state.usuario_actual}</strong><br>
+        <small>Empleados: {len(st.session_state.empleados)}</small>
+    </div>
+    """, unsafe_allow_html=True)
 
-# Menú lateral
-with st.sidebar:
-    st.markdown("## Menú Principal")
-    st.divider()
-    
-    opcion = st.radio(
-        "Navegación",
-        ["Empleados", "Dashboard", "Config", "Usuarios", "Backup", "Sistema"],
-        label_visibility="collapsed"
-    )
-    
-    st.divider()
-    st.caption(f"Usuario: {st.session_state.usuario_actual}")
-    st.caption(f"Último acceso: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    st.caption(f"Empleados: {len(st.session_state.empleados)}")
+# Menú con botones en recuadros
+st.markdown("### 📋 Menú Principal")
+st.markdown("---")
+
+# Crear 6 columnas para los 6 botones
+col1, col2, col3, col4, col5, col6 = st.columns(6)
+
+# Función para crear botones de menú
+def crear_boton_menu(col, nombre, icono, pagina):
+    with col:
+        # Determinar si es la página actual
+        es_activo = st.session_state.pagina_actual == pagina
+        
+        # Clase CSS para botón activo
+        clase = "boton-activo" if es_activo else ""
+        
+        # Crear botón
+        if st.button(f"{icono}\n{nombre}", key=f"btn_{pagina}", use_container_width=True):
+            st.session_state.pagina_actual = pagina
+            st.rerun()
+
+# Crear los botones del menú
+crear_boton_menu(col1, "Empleados", "👥", "Empleados")
+crear_boton_menu(col2, "Dashboard", "📊", "Dashboard")
+crear_boton_menu(col3, "Config", "⚙️", "Config")
+crear_boton_menu(col4, "Usuarios", "👤", "Usuarios")
+crear_boton_menu(col5, "Backup", "💾", "Backup")
+crear_boton_menu(col6, "Sistema", "🖥️", "Sistema")
+
+st.markdown("---")
 
 # -------------------- NAVEGACIÓN --------------------
-if opcion == "Empleados":
+if st.session_state.pagina_actual == "Empleados":
     pagina_empleados()
-elif opcion == "Dashboard":
+elif st.session_state.pagina_actual == "Dashboard":
     pagina_dashboard()
-elif opcion == "Config":
+elif st.session_state.pagina_actual == "Config":
     pagina_config()
-elif opcion == "Usuarios":
+elif st.session_state.pagina_actual == "Usuarios":
     pagina_usuarios()
-elif opcion == "Backup":
+elif st.session_state.pagina_actual == "Backup":
     pagina_backup()
-elif opcion == "Sistema":
+elif st.session_state.pagina_actual == "Sistema":
     pagina_sistema()
