@@ -224,6 +224,7 @@ def guardar_config(config):
         json.dump(config, f, indent=4, ensure_ascii=False)
 
 # -------------------- FUNCIONES DE AUTENTICACIÓN Y USUARIOS --------------------
+# -------------------- FUNCIONES DE AUTENTICACIÓN Y USUARIOS --------------------
 def autenticar_usuario(username, password):
     """Verifica las credenciales del usuario"""
     conn = get_connection()
@@ -334,6 +335,22 @@ def toggle_usuario_activo(username, activo):
     c.execute("UPDATE usuarios SET activo = ? WHERE username = ?", (activo, username))
     conn.commit()
     conn.close()
+
+# ========== NUEVA FUNCIÓN: AGREGAR AQUÍ ==========
+def eliminar_usuario_db(username):
+    """Elimina permanentemente un usuario de la base de datos"""
+    conn = get_connection()
+    c = conn.cursor()
+    try:
+        c.execute("DELETE FROM usuarios WHERE username = ?", (username,))
+        conn.commit()
+        return True
+    except Exception as e:
+        st.error(f"Error al eliminar usuario: {e}")
+        return False
+    finally:
+        conn.close()
+# ========== FIN DE LA NUEVA FUNCIÓN ==========
 
 def cerrar_sesion():
     """Cierra la sesión del usuario actual"""
@@ -765,11 +782,26 @@ def pagina_usuarios():
     with tab1:
         usuarios_df = cargar_usuarios_db()
         if not usuarios_df.empty:
+            # Agregar encabezados
+            col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 2, 1, 1])
+            with col1:
+                st.markdown("**Usuario**")
+            with col2:
+                st.markdown("**Rol**")
+            with col3:
+                st.markdown("**Empleado**")
+            with col4:
+                st.markdown("**Último acceso**")
+            with col5:
+                st.markdown("**Estado**")
+            with col6:
+                st.markdown("**Acciones**")
+            st.divider()
+            
             for _, row in usuarios_df.iterrows():
-                col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
+                col1, col2, col3, col4, col5, col6 = st.columns([2, 2, 2, 2, 1, 1])
                 with col1:
-                    estado = "✅" if row['activo'] else "❌"
-                    st.write(f"{estado} {row['username']}")
+                    st.write(row['username'])
                 with col2:
                     st.write(row['rol'])
                 with col3:
@@ -777,11 +809,43 @@ def pagina_usuarios():
                 with col4:
                     st.write(row['ultimo_acceso'][:10] if row['ultimo_acceso'] else "Nunca")
                 with col5:
-                    if row['username'] != 'admin':
-                        if st.button("Desactivar" if row['activo'] else "Activar", 
-                                   key=f"toggle_{row['username']}"):
+                    estado = "✅" if row['activo'] else "❌"
+                    st.write(estado)
+                with col6:
+                    if row['username'] != 'admin':  # No permitir eliminar al admin principal
+                        # Botón de activar/desactivar
+                        if st.button("🔌" if row['activo'] else "🔓", 
+                                   key=f"toggle_{row['username']}",
+                                   help="Activar/Desactivar"):
                             toggle_usuario_activo(row['username'], 0 if row['activo'] else 1)
                             st.rerun()
+                        
+                        # Botón de eliminar
+                        if st.button("🗑️", 
+                                   key=f"delete_{row['username']}",
+                                   help="Eliminar permanentemente"):
+                            # Confirmación antes de eliminar
+                            if f"confirm_delete_{row['username']}" not in st.session_state:
+                                st.session_state[f"confirm_delete_{row['username']}"] = True
+                                st.rerun()
+                    else:
+                        st.write("🔒")  # Candado para admin
+                
+                # Mostrar confirmación de eliminación si está activada
+                if f"confirm_delete_{row['username']}" in st.session_state and row['username'] != 'admin':
+                    st.warning(f"¿Estás seguro de eliminar al usuario '{row['username']}'? Esta acción no se puede deshacer.")
+                    col_confirm1, col_confirm2, col_confirm3 = st.columns([1, 1, 4])
+                    with col_confirm1:
+                        if st.button("✅ Sí", key=f"confirm_yes_{row['username']}"):
+                            if eliminar_usuario_db(row['username']):
+                                st.success(f"✅ Usuario '{row['username']}' eliminado")
+                                del st.session_state[f"confirm_delete_{row['username']}"]
+                                st.rerun()
+                    with col_confirm2:
+                        if st.button("❌ No", key=f"confirm_no_{row['username']}"):
+                            del st.session_state[f"confirm_delete_{row['username']}"]
+                            st.rerun()
+                
                 st.divider()
         else:
             st.info("No hay usuarios registrados")
@@ -967,7 +1031,7 @@ else:
         pagina_login()
     elif st.session_state.pagina_actual == "Registro Ventas":
         pagina_registro_ventas()
-    elif st.session_state.pagina_actual == "Empleados":
+    elif st.session_state.pagina_actual == "Empleados":b
         pagina_empleados()
     elif st.session_state.pagina_actual == "Dashboard":
         pagina_dashboard()
