@@ -188,48 +188,114 @@ inicializar_estado()
 def pagina_empleados():
     st.title("👥 Empleados - Registro Diario de Ventas")
     
-    # SOLO UNA COLUMNA - Solo el registro de ventas, sin lista de empleados
-    st.subheader("📝 Registro Diario de Ventas")
+    # Crear pestañas para separar el registro de ventas de la administración de empleados
+    tab_ventas, tab_admin = st.tabs(["📝 Registrar Ventas", "⚙️ Administrar Empleados"])
     
-    col_fecha, col_nombre = st.columns(2)
+    with tab_ventas:
+        st.subheader("📝 Registro Diario de Ventas")
+        
+        col_fecha, col_nombre = st.columns(2)
+        
+        with col_fecha:
+            fecha = st.date_input("📅 Fecha", key="fecha_registro")
+        
+        with col_nombre:
+            if not st.session_state.empleados:
+                st.warning("⚠️ No hay empleados registrados")
+                empleado = st.selectbox("👤 Nombre", ["Sin empleados"])
+            else:
+                empleado = st.selectbox("👤 Nombre", st.session_state.empleados, key="empleado_select")
+        
+        # Campos de ventas en 2 columnas
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            autoliquidable = st.number_input("Autoliquidable", min_value=0, step=1, key="auto")
+            oferta = st.number_input("Oferta de la semana", min_value=0, step=1, key="ofer")
+        
+        with col2:
+            marca_propia = st.number_input("Marca propia", min_value=0, step=1, key="marca")
+            producto = st.number_input("Producto adicional", min_value=0, step=1, key="prod")
+        
+        # Botón de guardar
+        if st.button("💾 Guardar registro", use_container_width=True):
+            if st.session_state.empleados:
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute("""
+                    INSERT INTO registros_ventas
+                    (fecha, empleado, autoliquidable, oferta, marca_propia, producto_adicional)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (fecha, empleado, autoliquidable, oferta, marca_propia, producto))
+                conn.commit()
+                conn.close()
+                st.success("✅ Registro guardado")
+            else:
+                st.error("❌ No hay empleados para registrar ventas")
     
-    with col_fecha:
-        fecha = st.date_input("📅 Fecha", key="fecha_registro")
-    
-    with col_nombre:
-        if not st.session_state.empleados:
-            st.warning("⚠️ No hay empleados registrados")
-            empleado = st.selectbox("👤 Nombre", ["Sin empleados"])
-        else:
-            empleado = st.selectbox("👤 Nombre", st.session_state.empleados, key="empleado_select")
-    
-    # Campos de ventas en 2 columnas
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        autoliquidable = st.number_input("Autoliquidable", min_value=0, step=1, key="auto")
-        oferta = st.number_input("Oferta de la semana", min_value=0, step=1, key="ofer")
-    
-    with col2:
-        marca_propia = st.number_input("Marca propia", min_value=0, step=1, key="marca")
-        producto = st.number_input("Producto adicional", min_value=0, step=1, key="prod")
-    
-    # Botón de guardar
-    if st.button("💾 Guardar registro", use_container_width=True):
-        if st.session_state.empleados:
+    with tab_admin:
+        st.subheader("👥 Administración de Empleados")
+        
+        col_agregar, col_lista = st.columns([1, 1])
+        
+        with col_agregar:
+            st.markdown("**➕ Agregar Nuevo Empleado**")
+            with st.form("form_agregar_empleado"):
+                nuevo_empleado = st.text_input("Nombre completo del empleado")
+                
+                if st.form_submit_button("Agregar empleado", use_container_width=True):
+                    if nuevo_empleado:
+                        if guardar_empleado_db(nuevo_empleado):
+                            st.success(f"✅ Empleado '{nuevo_empleado}' agregado correctamente")
+                            # Actualizar la lista de empleados en el estado
+                            st.session_state.empleados = cargar_empleados_db()
+                            st.rerun()
+                        else:
+                            st.error("❌ El empleado ya existe o hubo un error")
+                    else:
+                        st.error("❌ Por favor ingresa un nombre")
+        
+        with col_lista:
+            st.markdown("**📋 Lista de Empleados Activos**")
+            
+            if st.session_state.empleados:
+                # Mostrar empleados en una tabla
+                empleados_df = pd.DataFrame({
+                    "Empleado": st.session_state.empleados,
+                    "Acciones": ["Eliminar"] * len(st.session_state.empleados)
+                })
+                
+                for i, emp in enumerate(st.session_state.empleados):
+                    col_emp, col_btn = st.columns([3, 1])
+                    with col_emp:
+                        st.write(f"• {emp}")
+                    with col_btn:
+                        if st.button("🗑️", key=f"eliminar_{i}", help=f"Eliminar a {emp}"):
+                            eliminar_empleado_db(emp)
+                            st.success(f"✅ Empleado '{emp}' eliminado")
+                            # Actualizar la lista de empleados
+                            st.session_state.empleados = cargar_empleados_db()
+                            st.rerun()
+            else:
+                st.info("📭 No hay empleados registrados")
+        
+        # Mostrar estadísticas de empleados
+        st.markdown("---")
+        st.subheader("📊 Estadísticas de Empleados")
+        
+        col_total, col_activos = st.columns(2)
+        
+        with col_total:
+            # Contar total de empleados (incluyendo inactivos)
             conn = get_connection()
-            c = conn.cursor()
-            c.execute("""
-                INSERT INTO registros_ventas
-                (fecha, empleado, autoliquidable, oferta, marca_propia, producto_adicional)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, (fecha, empleado, autoliquidable, oferta, marca_propia, producto))
-            conn.commit()
+            df_total = pd.read_sql("SELECT COUNT(*) as total FROM empleados", conn)
+            total_empleados = df_total['total'].iloc[0] if not df_total.empty else 0
             conn.close()
-            st.success("✅ Registro guardado")
-             st.session_state.empleados = cargar_empleados_db()  # Recarga datos si es necesario
-        else:
-            st.error("❌ No hay empleados para registrar ventas")
+            
+            st.metric("Total empleados (histórico)", total_empleados)
+        
+        with col_activos:
+            st.metric("Empleados activos", len(st.session_state.empleados))
 
 def pagina_config():
     st.title("⚙️ Configuración")
