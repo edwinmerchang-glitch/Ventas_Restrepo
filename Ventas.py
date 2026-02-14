@@ -30,16 +30,83 @@ def create_table():
 
 create_table()
 
+# -------------------- FUNCIÓN PARA CARGAR EMPLEADOS --------------------
+def cargar_empleados():
+    """Carga la lista de empleados desde la sesión o usa la lista por defecto"""
+    if 'empleados' not in st.session_state:
+        st.session_state.empleados = [
+            "Angel Bonilla", "Claudia Parada", "Cristina Gomez", "Daniela Velasco",
+            "Darcy Tovar", "Erika Salazar", "Estheiry Cardozo", "Janeth Jimenez",
+            "Jessica Sanabria", "Johanna Cuervo", "Leonardo Vera", "Lucia Guerrero",
+            "Luna Galindez", "Mariana Mejia", "Niyireth Silva", "Ruth Avila", "Valeria Delgado"
+        ]
+    return st.session_state.empleados
+
+# -------------------- FUNCIÓN PARA GUARDAR EMPLEADOS --------------------
+def guardar_empleados(nueva_lista):
+    """Guarda la nueva lista de empleados en la sesión"""
+    st.session_state.empleados = nueva_lista
+
 # -------------------- UI --------------------
 st.title("📊 Equipo Locatel Restrepo")
-menu = st.sidebar.radio("Menú", ["📝 Registrar Ventas", "📋 Ver Registros", "📈 Dashboard"])
 
-empleados = [
-    "Angel Bonilla","Claudia Parada","Cristina Gomez","Daniela Velasco",
-    "Darcy Tovar","Erika Salazar","Estheiry Cardozo","Janeth Jimenez",
-    "Jessica Sanabria","Johanna Cuervo","Leonardo Vera","Lucia Guerrero",
-    "Luna Galindez","Mariana Mejia","Niyireth Silva","Ruth Avila","Valeria Delgado"
-]
+# Menú principal
+menu = st.sidebar.radio("Menú", ["📝 Registrar Ventas", "📋 Ver Registros", "📈 Dashboard", "⚙️ Administrar Empleados"])
+
+empleados = cargar_empleados()
+
+# -------------------- ADMINISTRAR EMPLEADOS --------------------
+if menu == "⚙️ Administrar Empleados":
+    st.subheader("👥 Administrar Lista de Empleados")
+    
+    st.info("Aquí puedes modificar los nombres de las personas que aparecen en el registro diario.")
+    
+    # Mostrar lista actual
+    st.write("**Lista actual de empleados:**")
+    empleados_actuales = st.session_state.empleados.copy()
+    
+    # Editor de empleados
+    with st.form("form_empleados"):
+        st.write("Edita la lista de empleados (un nombre por línea):")
+        nombres_texto = st.text_area(
+            "Nombres de empleados",
+            value="\n".join(empleados_actuales),
+            height=300,
+            help="Escribe un nombre por línea. Los cambios se guardarán al hacer clic en 'Guardar Cambios'"
+        )
+        
+        col1, col2, col3 = st.columns([1, 1, 2])
+        with col1:
+            guardar = st.form_submit_button("💾 Guardar Cambios", use_container_width=True)
+        with col2:
+            restaurar = st.form_submit_button("🔄 Restaurar Original", use_container_width=True)
+    
+    if guardar:
+        # Procesar el texto y crear lista (eliminar líneas vacías y espacios extras)
+        nueva_lista = [nombre.strip() for nombre in nombres_texto.split('\n') if nombre.strip()]
+        if nueva_lista:
+            guardar_empleados(nueva_lista)
+            st.success(f"✅ Lista de empleados actualizada correctamente ({len(nueva_lista)} empleados)")
+            st.rerun()
+        else:
+            st.error("❌ La lista no puede estar vacía")
+    
+    if restaurar:
+        # Restaurar lista original
+        lista_original = [
+            "Angel Bonilla", "Claudia Parada", "Cristina Gomez", "Daniela Velasco",
+            "Darcy Tovar", "Erika Salazar", "Estheiry Cardozo", "Janeth Jimenez",
+            "Jessica Sanabria", "Johanna Cuervo", "Leonardo Vera", "Lucia Guerrero",
+            "Luna Galindez", "Mariana Mejia", "Niyireth Silva", "Ruth Avila", "Valeria Delgado"
+        ]
+        guardar_empleados(lista_original)
+        st.success("✅ Lista restaurada a la original")
+        st.rerun()
+    
+    # Vista previa de cómo se verá en el selector
+    st.divider()
+    st.write("**Vista previa del selector de empleados:**")
+    st.selectbox("Así se verá en el registro diario", st.session_state.empleados)
 
 # -------------------- REGISTRO --------------------
 if menu == "📝 Registrar Ventas":
@@ -91,8 +158,10 @@ if menu == "📋 Ver Registros":
 
     st.dataframe(df, use_container_width=True)
 
-    excel = df.to_excel(index=False, engine='openpyxl')
-    st.download_button("📥 Descargar Excel", excel, "ventas_locatel.xlsx")
+    if not df.empty:
+        # Convertir a Excel para descargar
+        excel = df.to_excel(index=False, engine='openpyxl')
+        st.download_button("📥 Descargar Excel", excel, "ventas_locatel.xlsx")
 
 # -------------------- DASHBOARD --------------------
 if menu == "📈 Dashboard":
