@@ -8,28 +8,13 @@ from datetime import datetime
 # -------------------- CONFIG --------------------
 st.set_page_config(page_title="Equipo Locatel Restrepo", layout="wide")
 
-import streamlit as st
-import sqlite3
-import pandas as pd
-import json
-import os
-from datetime import datetime
-
-# -------------------- CONFIG --------------------
-st.set_page_config(page_title="Equipo Locatel Restrepo", layout="wide")
-
 # Configuración para desarrollo - EVITA EL CACHÉ
 import sys
 if "streamlit run" in " ".join(sys.argv):
-    # Deshabilitar caché en desarrollo
     os.environ["STREAMLIT_SERVER_FILE_WATCHER_TYPE"] = "poll"
     os.environ["STREAMLIT_SERVER_RUN_ON_SAVE"] = "true"
     os.environ["STREAMLIT_BROWSER_GATHER_USAGE_STATS"] = "false"
 
-# Forzar recarga de módulos
-import importlib
-import Ventas as self_module
-importlib.reload(self_module)
 # -------------------- DB --------------------
 def get_connection():
     return sqlite3.connect("ventas.db", check_same_thread=False)
@@ -66,7 +51,7 @@ def create_tables():
     try:
         c.execute("ALTER TABLE empleados ADD COLUMN departamento TEXT DEFAULT 'Droguería'")
     except:
-        pass  # La columna ya existe
+        pass
     
     # Tabla de usuarios
     c.execute("""
@@ -75,12 +60,40 @@ def create_tables():
             username TEXT UNIQUE,
             password TEXT,
             rol TEXT,
+            empleado_id INTEGER,
+            activo INTEGER DEFAULT 1,
             fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             ultimo_acceso TIMESTAMP
         )
     """)
     
-    # Insertar empleados por defecto con departamento
+    conn.commit()
+    conn.close()
+
+def actualizar_esquema_bd():
+    """Actualiza el esquema de la base de datos si es necesario"""
+    conn = get_connection()
+    c = conn.cursor()
+    
+    # Verificar columnas en usuarios
+    c.execute("PRAGMA table_info(usuarios)")
+    columnas = [col[1] for col in c.fetchall()]
+    
+    if 'empleado_id' not in columnas:
+        c.execute("ALTER TABLE usuarios ADD COLUMN empleado_id INTEGER")
+    
+    if 'activo' not in columnas:
+        c.execute("ALTER TABLE usuarios ADD COLUMN activo INTEGER DEFAULT 1")
+    
+    conn.commit()
+    conn.close()
+
+def insertar_datos_iniciales():
+    """Inserta datos iniciales en la base de datos"""
+    conn = get_connection()
+    c = conn.cursor()
+    
+    # Insertar empleados por defecto
     empleados_default = [
         ("Angel Bonilla", "Droguería"),
         ("Claudia Parada", "Droguería"),
@@ -109,15 +122,25 @@ def create_tables():
     
     # Insertar usuario admin
     try:
-        c.execute("INSERT OR IGNORE INTO usuarios (username, password, rol) VALUES (?, ?, ?)",
-                  ("admin", "admin123", "Administrador"))
+        c.execute("INSERT OR IGNORE INTO usuarios (username, password, rol, activo) VALUES (?, ?, ?, ?)",
+                  ("admin", "admin123", "Administrador", 1))
+    except:
+        pass
+    
+    # Insertar usuario supervisor
+    try:
+        c.execute("INSERT OR IGNORE INTO usuarios (username, password, rol, activo) VALUES (?, ?, ?, ?)",
+                  ("supervisor", "super123", "Supervisor", 1))
     except:
         pass
     
     conn.commit()
     conn.close()
 
+# Crear tablas y datos iniciales
 create_tables()
+actualizar_esquema_bd()
+insertar_datos_iniciales()
 
 # -------------------- FUNCIONES PARA EMPLEADOS --------------------
 def cargar_empleados_db():
@@ -130,35 +153,29 @@ def cargar_empleados_db():
 def cargar_empleados_con_departamento():
     """Carga los empleados con su departamento"""
     conn = get_connection()
-    df = pd.read_sql("SELECT nombre, departamento FROM empleados WHERE activo = 1 ORDER BY nombre", conn)
+    df = pd.read_sql("SELECT id, nombre, departamento FROM empleados WHERE activo = 1 ORDER BY nombre", conn)
     conn.close()
     return df
 
 def guardar_empleado_db(nombre, departamento):
-    """Guarda un nuevo empleado en la base de datos con su departamento"""
+    """Guarda un nuevo empleado en la base de datos"""
     conn = get_connection()
     c = conn.cursor()
     try:
-        # Verificar si el empleado ya existe (activo o inactivo)
         c.execute("SELECT activo FROM empleados WHERE nombre = ?", (nombre,))
         resultado = c.fetchone()
         
         if resultado:
             if resultado[0] == 0:
-                # Si existe pero está inactivo, lo reactivamos
                 c.execute("UPDATE empleados SET activo = 1, departamento = ? WHERE nombre = ?", (departamento, nombre))
                 conn.commit()
                 return True
             else:
-                # Si existe y está activo
                 return False
         else:
-            # Si no existe, lo insertamos
             c.execute("INSERT INTO empleados (nombre, departamento, activo) VALUES (?, ?, 1)", (nombre, departamento))
             conn.commit()
             return True
-    except sqlite3.IntegrityError:
-        return False
     except Exception as e:
         st.error(f"Error: {e}")
         return False
@@ -206,11 +223,37 @@ def guardar_config(config):
     with open(ARCHIVO_CONFIG, 'w', encoding='utf-8') as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
 
-# -------------------- FUNCIONES PARA USUARIOS --------------------
+# -------------------- FUNCIONES DE AUTENTICACIÓN Y USUARIOS --------------------
+def autenticar_usuario(username, password):
+    """Verifica las credenciales del usuario"""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT username, rol, empleado_id, activo 
+        FROM usuarios 
+        WHERE username = ? AND password = ? AND activo = 1
+    """, (username, password))
+    usuario = c.fetchone()
+    conn.close()
+    
+    if usuario:
+        return {
+            'username': usuario[0],
+            'rol': usuario[1],
+            'empleado_id': usuario[2],
+            'activo': usuario[3]
+        }
+    return None
+
 def cargar_usuarios_db():
     """Carga los usuarios desde la base de datos"""
     conn = get_connection()
-    df = pd.read_sql("SELECT username, rol, ultimo_acceso FROM usuarios", conn)
+    df = pd.read_sql("""
+        SELECT u.username, u.rol, u.activo, u.ultimo_acceso, e.nombre as empleado
+        FROM usuarios u
+        LEFT JOIN empleados e ON u.empleado_id = e.id
+        ORDER BY u.username
+    """, conn)
     conn.close()
     return df
 
@@ -219,7 +262,7 @@ def crear_usuario_db(username, password, rol):
     conn = get_connection()
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO usuarios (username, password, rol) VALUES (?, ?, ?)",
+        c.execute("INSERT INTO usuarios (username, password, rol, activo) VALUES (?, ?, ?, 1)",
                   (username, password, rol))
         conn.commit()
         return True
@@ -227,6 +270,53 @@ def crear_usuario_db(username, password, rol):
         return False
     finally:
         conn.close()
+
+def crear_usuario_empleado(username, password, empleado_nombre):
+    """Crea un usuario asociado a un empleado existente"""
+    conn = get_connection()
+    c = conn.cursor()
+    
+    try:
+        c.execute("SELECT id FROM empleados WHERE nombre = ? AND activo = 1", (empleado_nombre,))
+        empleado = c.fetchone()
+        
+        if not empleado:
+            return False, "El empleado no existe"
+        
+        c.execute("SELECT id FROM usuarios WHERE empleado_id = ?", (empleado[0],))
+        if c.fetchone():
+            return False, "El empleado ya tiene un usuario asignado"
+        
+        c.execute("""
+            INSERT INTO usuarios (username, password, rol, empleado_id, activo) 
+            VALUES (?, ?, ?, ?, 1)
+        """, (username, password, 'Vendedor', empleado[0]))
+        
+        conn.commit()
+        return True, "Usuario creado exitosamente"
+    except sqlite3.IntegrityError:
+        return False, "El nombre de usuario ya existe"
+    except Exception as e:
+        return False, f"Error: {e}"
+    finally:
+        conn.close()
+
+def obtener_empleados_sin_usuario():
+    """Obtiene lista de empleados que no tienen usuario asignado"""
+    conn = get_connection()
+    df = pd.read_sql("""
+        SELECT e.nombre 
+        FROM empleados e 
+        WHERE e.activo = 1 
+        AND e.id NOT IN (
+            SELECT u.empleado_id 
+            FROM usuarios u 
+            WHERE u.empleado_id IS NOT NULL AND u.activo = 1
+        )
+        ORDER BY e.nombre
+    """, conn)
+    conn.close()
+    return df['nombre'].tolist() if not df.empty else []
 
 def actualizar_ultimo_acceso(username):
     """Actualiza la fecha de último acceso del usuario"""
@@ -236,6 +326,35 @@ def actualizar_ultimo_acceso(username):
               (datetime.now(), username))
     conn.commit()
     conn.close()
+
+def toggle_usuario_activo(username, activo):
+    """Activa o desactiva un usuario"""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE usuarios SET activo = ? WHERE username = ?", (activo, username))
+    conn.commit()
+    conn.close()
+
+def cerrar_sesion():
+    """Cierra la sesión del usuario actual"""
+    for key in ['usuario_actual', 'usuario_rol', 'usuario_empleado_id', 'autenticado']:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.session_state.pagina_actual = "Login"
+    st.rerun()
+
+def verificar_permiso(rol_requerido):
+    """Verifica si el usuario tiene el rol requerido"""
+    if 'usuario_rol' not in st.session_state:
+        return False
+    
+    if rol_requerido == "Vendedor":
+        return st.session_state.usuario_rol in ["Vendedor", "Supervisor", "Administrador"]
+    elif rol_requerido == "Supervisor":
+        return st.session_state.usuario_rol in ["Supervisor", "Administrador"]
+    elif rol_requerido == "Administrador":
+        return st.session_state.usuario_rol == "Administrador"
+    return False
 
 # -------------------- INICIALIZAR ESTADO DE LA SESIÓN --------------------
 def inicializar_estado():
@@ -249,22 +368,231 @@ def inicializar_estado():
     if 'config' not in st.session_state:
         st.session_state.config = cargar_config()
     
-    if 'usuario_actual' not in st.session_state:
-        st.session_state.usuario_actual = "admin"
-        actualizar_ultimo_acceso("admin")
-    
     if 'pagina_actual' not in st.session_state:
-        st.session_state.pagina_actual = "Empleados"
+        st.session_state.pagina_actual = "Login"
+    
+    if 'autenticado' not in st.session_state:
+        st.session_state.autenticado = False
 
 # Llamar a la función para inicializar
 inicializar_estado()
 
-# -------------------- FUNCIONES DE PÁGINAS --------------------
-def pagina_empleados():
-    st.title("👥 Empleados - Registro Diario de Ventas")
+# -------------------- PÁGINA DE LOGIN --------------------
+def pagina_login():
+    """Página de inicio de sesión"""
     
-    # Crear pestañas
-    tab_ventas, tab_admin, tab_departamentos = st.tabs(["📝 Registrar Ventas", "⚙️ Administrar Empleados", "📊 Por Departamento"])
+    st.markdown("""
+    <style>
+    .login-container {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 80vh;
+    }
+    .login-box {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        width: 100%;
+        max-width: 400px;
+        color: white;
+    }
+    .login-title {
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .stTextInput > div > div > input {
+        background-color: rgba(255,255,255,0.9);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("""
+        <div class="login-box">
+            <h2 class="login-title">🏥 Equipo Locatel Restrepo</h2>
+            <h3 class="login-title">Sistema de Ventas</h3>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        with st.form("login_form"):
+            username = st.text_input("👤 Usuario", placeholder="Ingresa tu usuario")
+            password = st.text_input("🔑 Contraseña", type="password", placeholder="Ingresa tu contraseña")
+            
+            submitted = st.form_submit_button("Iniciar Sesión", use_container_width=True)
+            
+            if submitted:
+                if username and password:
+                    usuario = autenticar_usuario(username, password)
+                    
+                    if usuario:
+                        st.session_state.usuario_actual = usuario['username']
+                        st.session_state.usuario_rol = usuario['rol']
+                        st.session_state.usuario_empleado_id = usuario['empleado_id']
+                        st.session_state.autenticado = True
+                        
+                        actualizar_ultimo_acceso(username)
+                        
+                        if usuario['rol'] == 'Vendedor':
+                            st.session_state.pagina_actual = "Registro Ventas"
+                        else:
+                            st.session_state.pagina_actual = "Empleados"
+                        
+                        st.success("✅ Login exitoso")
+                        st.rerun()
+                    else:
+                        st.error("❌ Usuario o contraseña incorrectos")
+                else:
+                    st.error("❌ Por favor ingresa usuario y contraseña")
+        
+        with st.expander("ℹ️ Credenciales de prueba"):
+            st.markdown("""
+            **Administrador:** admin / admin123<br>
+            **Supervisor:** supervisor / super123
+            """, unsafe_allow_html=True)
+
+# -------------------- PÁGINA PARA VENDEDORES --------------------
+def pagina_registro_ventas():
+    """Página simplificada para que los vendedores registren sus ventas"""
+    
+    st.title("📝 Registro de Ventas - Locatel Restrepo")
+    
+    # Información del vendedor
+    if st.session_state.usuario_empleado_id:
+        conn = get_connection()
+        df = pd.read_sql("""
+            SELECT nombre, departamento 
+            FROM empleados 
+            WHERE id = ? AND activo = 1
+        """, conn, params=(st.session_state.usuario_empleado_id,))
+        conn.close()
+        
+        if not df.empty:
+            empleado = df.iloc[0]
+            st.markdown(f"""
+            <div style="
+                background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
+                padding: 1.5rem;
+                border-radius: 10px;
+                margin-bottom: 2rem;
+                border-left: 5px solid #667eea;
+            ">
+                <h2 style="margin:0; color: #667eea;">👤 {empleado['nombre']}</h2>
+                <p style="margin:5px 0 0 0; color: #666; font-size: 1.1em;">{empleado['departamento']}</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            empleado_nombre = empleado['nombre']
+        else:
+            st.error("❌ No se encontró información del empleado")
+            return
+    else:
+        st.error("❌ Usuario no asociado a un empleado")
+        return
+    
+    # Formulario de registro
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        with st.form("form_registro_ventas"):
+            st.subheader("📋 Registrar Ventas del Día")
+            
+            fecha = st.date_input("📅 Fecha", value=datetime.now())
+            
+            col_auto, col_ofer = st.columns(2)
+            with col_auto:
+                autoliquidable = st.number_input("💊 Autoliquidable", min_value=0, step=1, value=0)
+            with col_ofer:
+                oferta = st.number_input("🏷️ Oferta semana", min_value=0, step=1, value=0)
+            
+            col_marca, col_prod = st.columns(2)
+            with col_marca:
+                marca_propia = st.number_input("⭐ Marca propia", min_value=0, step=1, value=0)
+            with col_prod:
+                producto_adicional = st.number_input("➕ Producto adicional", min_value=0, step=1, value=0)
+            
+            submitted = st.form_submit_button("💾 Guardar Registro", use_container_width=True)
+            
+            if submitted:
+                conn = get_connection()
+                c = conn.cursor()
+                c.execute("""
+                    INSERT INTO registros_ventas
+                    (fecha, empleado, autoliquidable, oferta, marca_propia, producto_adicional)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (fecha, empleado_nombre, autoliquidable, oferta, marca_propia, producto_adicional))
+                conn.commit()
+                conn.close()
+                
+                st.success("✅ ¡Ventas registradas exitosamente!")
+                st.balloons()
+                st.rerun()
+    
+    with col2:
+        # Mostrar registros del día
+        st.subheader("📊 Registros de Hoy")
+        
+        hoy = datetime.now().date()
+        conn = get_connection()
+        df_hoy = pd.read_sql("""
+            SELECT autoliquidable, oferta, marca_propia, producto_adicional, fecha_registro
+            FROM registros_ventas 
+            WHERE empleado = ? AND fecha = ?
+            ORDER BY fecha_registro DESC
+        """, conn, params=(empleado_nombre, hoy))
+        conn.close()
+        
+        if not df_hoy.empty:
+            total_auto = df_hoy['autoliquidable'].sum()
+            total_ofer = df_hoy['oferta'].sum()
+            total_marca = df_hoy['marca_propia'].sum()
+            total_prod = df_hoy['producto_adicional'].sum()
+            
+            col_t1, col_t2 = st.columns(2)
+            with col_t1:
+                st.metric("Autoliquidable", int(total_auto))
+                st.metric("Marca Propia", int(total_marca))
+            with col_t2:
+                st.metric("Oferta", int(total_ofer))
+                st.metric("Producto Adic.", int(total_prod))
+            
+            with st.expander("Ver detalles"):
+                st.dataframe(df_hoy, use_container_width=True)
+        else:
+            st.info("📭 No has registrado ventas hoy")
+    
+    # Registros recientes
+    st.markdown("---")
+    st.subheader("📈 Mis Últimos Registros")
+    
+    conn = get_connection()
+    df_recientes = pd.read_sql("""
+        SELECT fecha, autoliquidable, oferta, marca_propia, producto_adicional, 
+               (autoliquidable + oferta + marca_propia + producto_adicional) as total
+        FROM registros_ventas 
+        WHERE empleado = ? 
+        ORDER BY fecha DESC, fecha_registro DESC 
+        LIMIT 10
+    """, conn, params=(empleado_nombre,))
+    conn.close()
+    
+    if not df_recientes.empty:
+        st.dataframe(df_recientes, use_container_width=True, hide_index=True)
+    else:
+        st.info("📭 No tienes registros anteriores")
+
+# -------------------- PÁGINAS EXISTENTES (modificadas con permisos) --------------------
+def pagina_empleados():
+    if not verificar_permiso("Supervisor"):
+        st.error("❌ No tienes permisos para acceder a esta página")
+        return
+    
+    st.title("👥 Administración de Empleados")
+    
+    tab_ventas, tab_admin, tab_departamentos = st.tabs(["📝 Registrar Ventas", "⚙️ Admin Empleados", "📊 Por Departamento"])
     
     with tab_ventas:
         st.subheader("📝 Registro Diario de Ventas")
@@ -272,38 +600,27 @@ def pagina_empleados():
         col_fecha, col_nombre = st.columns(2)
         
         with col_fecha:
-            fecha = st.date_input("📅 Fecha", key="fecha_registro")
+            fecha = st.date_input("📅 Fecha", key="fecha_registro_admin")
         
         with col_nombre:
-            if not st.session_state.empleados:
-                st.warning("⚠️ No hay empleados registrados")
-                empleado = st.selectbox("👤 Nombre", ["Sin empleados"])
+            empleados_df = cargar_empleados_con_departamento()
+            if not empleados_df.empty:
+                opciones = [f"{row['nombre']} ({row['departamento']})" for _, row in empleados_df.iterrows()]
+                empleado_seleccionado = st.selectbox("👤 Empleado", opciones, key="empleado_select_admin")
+                empleado = empleado_seleccionado.split(" (")[0]
             else:
-                # Cargar empleados con departamento para mostrar información adicional
-                empleados_df = cargar_empleados_con_departamento()
-                if not empleados_df.empty:
-                    # Crear opciones con nombre y departamento
-                    opciones = [f"{row['nombre']} ({row['departamento']})" for _, row in empleados_df.iterrows()]
-                    empleado_seleccionado = st.selectbox("👤 Nombre", opciones, key="empleado_select")
-                    # Extraer solo el nombre para guardar en BD
-                    empleado = empleado_seleccionado.split(" (")[0]
-                else:
-                    empleado = st.selectbox("👤 Nombre", ["Sin empleados"])
+                empleado = st.selectbox("👤 Empleado", ["Sin empleados"])
         
-        # Campos de ventas en 2 columnas
         col1, col2 = st.columns(2)
-        
         with col1:
-            autoliquidable = st.number_input("Autoliquidable", min_value=0, step=1, key="auto")
-            oferta = st.number_input("Oferta de la semana", min_value=0, step=1, key="ofer")
-        
+            autoliquidable = st.number_input("Autoliquidable", min_value=0, step=1, key="auto_admin")
+            oferta = st.number_input("Oferta de la semana", min_value=0, step=1, key="ofer_admin")
         with col2:
-            marca_propia = st.number_input("Marca propia", min_value=0, step=1, key="marca")
-            producto = st.number_input("Producto adicional", min_value=0, step=1, key="prod")
+            marca_propia = st.number_input("Marca propia", min_value=0, step=1, key="marca_admin")
+            producto = st.number_input("Producto adicional", min_value=0, step=1, key="prod_admin")
         
-        # Botón de guardar
         if st.button("💾 Guardar registro", use_container_width=True):
-            if st.session_state.empleados:
+            if empleados_df is not None and not empleados_df.empty:
                 conn = get_connection()
                 c = conn.cursor()
                 c.execute("""
@@ -325,151 +642,89 @@ def pagina_empleados():
         
         with col_agregar:
             st.markdown("**➕ Agregar Nuevo Empleado**")
-            
-            # Formulario para agregar empleado
             with st.form("form_agregar_empleado"):
                 nuevo_empleado = st.text_input("Nombre completo del empleado")
-                departamento = st.selectbox(
-                    "Departamento",
-                    ["Droguería", "Equipos Médicos", "Tienda", "Cajas"],
-                    key="depto_nuevo"
-                )
-                
+                departamento = st.selectbox("Departamento", ["Droguería", "Equipos Médicos", "Tienda", "Cajas"])
                 submitted = st.form_submit_button("Agregar empleado", use_container_width=True)
                 
-                if submitted:
-                    if nuevo_empleado:
-                        # Llamar a la función con ambos parámetros
-                        if guardar_empleado_db(nuevo_empleado, departamento):
-                            st.success(f"✅ Empleado '{nuevo_empleado}' agregado al departamento {departamento}")
-                            # Actualizar la lista de empleados en el estado
-                            st.session_state.empleados = cargar_empleados_db()
-                            st.rerun()
-                        else:
-                            st.error("❌ El empleado ya existe o hubo un error")
+                if submitted and nuevo_empleado:
+                    if guardar_empleado_db(nuevo_empleado, departamento):
+                        st.success(f"✅ Empleado '{nuevo_empleado}' agregado")
+                        st.session_state.empleados = cargar_empleados_db()
+                        st.rerun()
                     else:
-                        st.error("❌ Por favor ingresa un nombre")
+                        st.error("❌ El empleado ya existe")
         
         with col_lista:
-            st.markdown("**📋 Lista de Empleados Activos**")
-            
-            # Cargar empleados con departamento
+            st.markdown("**📋 Empleados Activos**")
             empleados_df = cargar_empleados_con_departamento()
             
             if not empleados_df.empty:
-                # Mostrar empleados en una tabla
                 for i, row in empleados_df.iterrows():
                     col_emp, col_depto, col_btn = st.columns([3, 2, 1])
                     with col_emp:
                         st.write(f"• {row['nombre']}")
                     with col_depto:
-                        # Asignar color según departamento
-                        color = {
-                            "Droguería": "🔵",
-                            "Equipos Médicos": "🟢",
-                            "Tienda": "🟠",
-                            "Cajas": "🟣"
-                        }.get(row['departamento'], "⚪")
+                        color = {"Droguería": "🔵", "Equipos Médicos": "🟢", "Tienda": "🟠", "Cajas": "🟣"}.get(row['departamento'], "⚪")
                         st.write(f"{color} {row['departamento']}")
                     with col_btn:
-                        if st.button("🗑️", key=f"eliminar_{i}", help=f"Eliminar a {row['nombre']}"):
+                        if st.button("🗑️", key=f"eliminar_{i}"):
                             eliminar_empleado_db(row['nombre'])
-                            st.success(f"✅ Empleado '{row['nombre']}' eliminado")
-                            # Actualizar la lista de empleados
+                            st.success(f"✅ Empleado eliminado")
                             st.session_state.empleados = cargar_empleados_db()
                             st.rerun()
             else:
-                st.info("📭 No hay empleados registrados")
-        
-        # Mostrar estadísticas
-        st.markdown("---")
-        st.subheader("📊 Estadísticas de Empleados")
-        
-        col_total, col_activos = st.columns(2)
-        
-        with col_total:
-            conn = get_connection()
-            df_total = pd.read_sql("SELECT COUNT(*) as total FROM empleados", conn)
-            total_empleados = df_total['total'].iloc[0] if not df_total.empty else 0
-            conn.close()
-            st.metric("Total empleados (histórico)", total_empleados)
-        
-        with col_activos:
-            st.metric("Empleados activos", len(st.session_state.empleados))
+                st.info("📭 No hay empleados")
     
     with tab_departamentos:
         st.subheader("📊 Empleados por Departamento")
-        
-        # Mostrar distribución por departamento
         deptos_df = obtener_empleados_por_departamento()
         
         if not deptos_df.empty:
-            # Gráfico de barras con Plotly
             import plotly.express as px
-            fig = px.bar(
-                deptos_df, 
-                x='departamento', 
-                y='cantidad',
-                title="Cantidad de Empleados por Departamento",
-                color='departamento',
-                color_discrete_map={
-                    "Droguería": "#1f77b4",
-                    "Equipos Médicos": "#2ca02c",
-                    "Tienda": "#ff7f0e",
-                    "Cajas": "#9467bd"
-                }
-            )
+            fig = px.bar(deptos_df, x='departamento', y='cantidad', 
+                        title="Cantidad de Empleados por Departamento",
+                        color='departamento')
             fig.update_layout(showlegend=False)
             st.plotly_chart(fig, use_container_width=True)
-            
-            # Mostrar tabla detallada
-            st.subheader("📋 Detalle por Departamento")
-            
-            # Crear columnas para cada departamento
-            cols = st.columns(4)
-            departamentos = ["Droguería", "Equipos Médicos", "Tienda", "Cajas"]
-            colores = {"Droguería": "#1f77b4", "Equipos Médicos": "#2ca02c", 
-                      "Tienda": "#ff7f0e", "Cajas": "#9467bd"}
-            
-            for idx, depto in enumerate(departamentos):
-                with cols[idx]:
-                    cantidad = deptos_df[deptos_df['departamento'] == depto]['cantidad'].values
-                    cantidad = cantidad[0] if len(cantidad) > 0 else 0
-                    
-                    st.markdown(f"""
-                    <div style="
-                        background-color: {colores[depto]}20;
-                        padding: 15px;
-                        border-radius: 10px;
-                        border-left: 5px solid {colores[depto]};
-                        margin-bottom: 10px;
-                    ">
-                        <h4 style="margin:0; color: {colores[depto]};">{depto}</h4>
-                        <h2 style="margin:5px 0;">{cantidad}</h2>
-                        <small>empleados</small>
-                    </div>
-                    """, unsafe_allow_html=True)
-            
-            # Lista de empleados por departamento
-            st.subheader("👥 Lista de Empleados por Departamento")
-            
-            empleados_df = cargar_empleados_con_departamento()
-            
-            for depto in departamentos:
-                with st.expander(f"📌 {depto} ({len(empleados_df[empleados_df['departamento'] == depto])} empleados)"):
-                    empleados_depto = empleados_df[empleados_df['departamento'] == depto]
-                    if not empleados_depto.empty:
-                        for _, row in empleados_depto.iterrows():
-                            st.write(f"• {row['nombre']}")
-                    else:
-                        st.write("No hay empleados en este departamento")
-        else:
-            st.info("📭 No hay empleados registrados")
+
+def pagina_dashboard():
+    if not verificar_permiso("Supervisor"):
+        st.error("❌ No tienes permisos para acceder a esta página")
+        return
+    
+    st.title("📊 Dashboard de Ventas")
+    
+    conn = get_connection()
+    df = pd.read_sql("SELECT * FROM registros_ventas ORDER BY fecha DESC", conn)
+    conn.close()
+    
+    if not df.empty:
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Autoliquidable", int(df["autoliquidable"].sum()))
+        col2.metric("Oferta", int(df["oferta"].sum()))
+        col3.metric("Marca Propia", int(df["marca_propia"].sum()))
+        col4.metric("Producto Adicional", int(df["producto_adicional"].sum()))
+        
+        st.subheader("📊 Ventas por Empleado")
+        ventas_empleado = df.groupby("empleado")[["autoliquidable","oferta","marca_propia","producto_adicional"]].sum()
+        st.bar_chart(ventas_empleado)
+        
+        st.subheader("📅 Ventas por Fecha")
+        ventas_fecha = df.groupby("fecha")[["autoliquidable","oferta","marca_propia","producto_adicional"]].sum()
+        st.line_chart(ventas_fecha)
+        
+        st.subheader("📋 Ventas Recientes")
+        st.dataframe(df.head(20), use_container_width=True)
+    else:
+        st.info("📭 Aún no hay datos registrados")
 
 def pagina_config():
-    st.title("⚙️ Configuración")
+    if not verificar_permiso("Administrador"):
+        st.error("❌ No tienes permisos para acceder a esta página")
+        return
     
-    st.subheader("Ajustes de la aplicación")
+    st.title("⚙️ Configuración")
     
     col1, col2 = st.columns(2)
     
@@ -490,268 +745,237 @@ def pagina_config():
         )
     
     if st.button("Guardar configuración", use_container_width=True):
-        # Actualizar configuración
         st.session_state.config.update({
             "tema": tema,
             "idioma": idioma,
             "productos_seleccionados": productos_seleccionados
         })
         guardar_config(st.session_state.config)
-        st.success("✅ Configuración guardada permanentemente")
+        st.success("✅ Configuración guardada")
 
 def pagina_usuarios():
-    st.title("👤 Usuarios")
+    if not verificar_permiso("Administrador"):
+        st.error("❌ No tienes permisos para acceder a esta página")
+        return
     
-    tab1, tab2, tab3 = st.tabs(["Usuarios activos", "Agregar usuario", "Permisos"])
+    st.title("👤 Administración de Usuarios")
+    
+    tab1, tab2, tab3 = st.tabs(["👥 Usuarios", "➕ Crear Usuario Empleado", "👑 Crear Admin/Supervisor"])
     
     with tab1:
         usuarios_df = cargar_usuarios_db()
         if not usuarios_df.empty:
-            st.dataframe(usuarios_df, use_container_width=True)
+            for _, row in usuarios_df.iterrows():
+                col1, col2, col3, col4, col5 = st.columns([2, 2, 2, 2, 1])
+                with col1:
+                    estado = "✅" if row['activo'] else "❌"
+                    st.write(f"{estado} {row['username']}")
+                with col2:
+                    st.write(row['rol'])
+                with col3:
+                    st.write(row['empleado'] if row['empleado'] else "-")
+                with col4:
+                    st.write(row['ultimo_acceso'][:10] if row['ultimo_acceso'] else "Nunca")
+                with col5:
+                    if row['username'] != 'admin':
+                        if st.button("Desactivar" if row['activo'] else "Activar", 
+                                   key=f"toggle_{row['username']}"):
+                            toggle_usuario_activo(row['username'], 0 if row['activo'] else 1)
+                            st.rerun()
+                st.divider()
         else:
             st.info("No hay usuarios registrados")
     
     with tab2:
-        with st.form("form_usuario"):
-            nuevo_usuario = st.text_input("Nombre de usuario")
-            nueva_password = st.text_input("Contraseña", type="password")
-            nuevo_rol = st.selectbox("Rol", ["Administrador", "Vendedor", "Supervisor"])
-            
-            if st.form_submit_button("Crear usuario", use_container_width=True):
-                if nuevo_usuario and nueva_password:
-                    if crear_usuario_db(nuevo_usuario, nueva_password, nuevo_rol):
-                        st.success(f"✅ Usuario {nuevo_usuario} creado permanentemente")
-                        st.rerun()
+        empleados_sin_usuario = obtener_empleados_sin_usuario()
+        
+        if empleados_sin_usuario:
+            with st.form("form_usuario_empleado"):
+                empleado = st.selectbox("Seleccionar empleado", empleados_sin_usuario)
+                username = st.text_input("Usuario")
+                password = st.text_input("Contraseña", type="password")
+                
+                if st.form_submit_button("Crear usuario vendedor"):
+                    if username and password:
+                        exito, mensaje = crear_usuario_empleado(username, password, empleado)
+                        if exito:
+                            st.success(f"✅ {mensaje}")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ {mensaje}")
                     else:
-                        st.error("❌ El nombre de usuario ya existe")
-                else:
-                    st.error("❌ Todos los campos son obligatorios")
+                        st.error("❌ Todos los campos son obligatorios")
+        else:
+            st.info("✅ Todos los empleados tienen usuario")
     
     with tab3:
-        st.info("🔧 Módulo de permisos en desarrollo")
+        with st.form("form_admin"):
+            username = st.text_input("Usuario")
+            password = st.text_input("Contraseña", type="password")
+            rol = st.selectbox("Rol", ["Administrador", "Supervisor"])
+            
+            if st.form_submit_button("Crear usuario"):
+                if username and password:
+                    if crear_usuario_db(username, password, rol):
+                        st.success(f"✅ Usuario {username} creado")
+                        st.rerun()
+                    else:
+                        st.error("❌ El usuario ya existe")
+                else:
+                    st.error("❌ Todos los campos son obligatorios")
 
 def pagina_backup():
-    st.title("💾 Backup")
+    if not verificar_permiso("Administrador"):
+        st.error("❌ No tienes permisos para acceder a esta página")
+        return
+    
+    st.title("💾 Backup y Restauración")
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("📀 Crear backup")
-        st.write("Crea una copia de seguridad de toda la base de datos")
-        
         if st.button("Crear backup ahora", use_container_width=True):
-            # Crear backup de la base de datos
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             nombre_backup = f"backup_ventas_{timestamp}.db"
             
             import shutil
             shutil.copy2("ventas.db", nombre_backup)
             
-            # También respaldar configuración
             if os.path.exists("config.json"):
                 shutil.copy2("config.json", f"backup_config_{timestamp}.json")
             
             st.success(f"✅ Backup creado: {nombre_backup}")
             
-            # Ofrecer descarga
             with open(nombre_backup, "rb") as f:
                 st.download_button("📥 Descargar backup", f, nombre_backup)
     
     with col2:
         st.subheader("🔄 Restaurar backup")
-        st.write("Selecciona un archivo de backup para restaurar")
-        
         archivo_backup = st.file_uploader("Seleccionar archivo de backup", type=['db'])
-        if archivo_backup and st.button("Restaurar", use_container_width=True):
-            st.warning("⚠️ ¿Estás seguro? Esto sobrescribirá TODOS los datos actuales")
-            col_si, col_no = st.columns(2)
-            with col_si:
-                if st.button("SÍ, restaurar"):
-                    # Guardar el archivo subido
-                    with open("ventas.db", "wb") as f:
-                        f.write(archivo_backup.getbuffer())
-                    st.success("✅ Base de datos restaurada")
-                    st.rerun()
-            with col_no:
-                if st.button("No, cancelar"):
-                    st.info("Restauración cancelada")
+        if archivo_backup:
+            if st.button("Restaurar", use_container_width=True):
+                with open("ventas.db", "wb") as f:
+                    f.write(archivo_backup.getbuffer())
+                st.success("✅ Base de datos restaurada")
+                st.rerun()
 
 def pagina_sistema():
-    st.title("🖥️ Sistema")
+    if not verificar_permiso("Administrador"):
+        st.error("❌ No tienes permisos para acceder a esta página")
+        return
     
-    st.subheader("Información del sistema")
+    st.title("🖥️ Información del Sistema")
     
     conn = get_connection()
-    df_ventas = pd.read_sql("SELECT COUNT(*) as total FROM registros_ventas", conn)
-    df_empleados = pd.read_sql("SELECT COUNT(*) as total FROM empleados WHERE activo = 1", conn)
-    df_usuarios = pd.read_sql("SELECT COUNT(*) as total FROM usuarios", conn)
+    total_ventas = pd.read_sql("SELECT COUNT(*) as total FROM registros_ventas", conn)['total'].iloc[0]
+    total_empleados = pd.read_sql("SELECT COUNT(*) as total FROM empleados WHERE activo = 1", conn)['total'].iloc[0]
+    total_usuarios = pd.read_sql("SELECT COUNT(*) as total FROM usuarios", conn)['total'].iloc[0]
     conn.close()
-    
-    total_ventas = df_ventas['total'].iloc[0] if not df_ventas.empty else 0
-    total_empleados = df_empleados['total'].iloc[0] if not df_empleados.empty else 0
-    total_usuarios = df_usuarios['total'].iloc[0] if not df_usuarios.empty else 0
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.metric("Versión", "1.0.0")
+        st.metric("Versión", "2.0.0")
         st.metric("Base de datos", "SQLite")
-        st.metric("Registros de ventas", total_ventas)
+        st.metric("Registros ventas", total_ventas)
     
     with col2:
         st.metric("Empleados activos", total_empleados)
-        st.metric("Usuarios del sistema", total_usuarios)
-        st.metric("Archivo config", "✅ OK" if os.path.exists("config.json") else "⚠️ No existe")
+        st.metric("Usuarios", total_usuarios)
+        st.metric("Usuario actual", st.session_state.usuario_actual)
     
     with col3:
-        st.metric("Última actualización", datetime.now().strftime("%Y-%m-%d"))
-        st.metric("Espacio DB", f"{os.path.getsize('ventas.db') / 1024:.1f} KB" if os.path.exists("ventas.db") else "0 KB")
+        st.metric("Rol", st.session_state.usuario_rol)
+        st.metric("Espacio DB", f"{os.path.getsize('ventas.db')/1024:.1f} KB")
         st.metric("Estado", "✅ Online")
-    
-    st.subheader("📋 Logs del sistema")
-    st.text_area("Registro de actividades", 
-                 f"{datetime.now().strftime('%Y-%m-%d %H:%M')}: Sistema iniciado\n"
-                 f"{datetime.now().strftime('%Y-%m-%d %H:%M')}: Usuario {st.session_state.usuario_actual} activo\n"
-                 f"{datetime.now().strftime('%Y-%m-%d %H:%M')}: {total_empleados} empleados cargados",
-                 height=150)
-
-def pagina_dashboard():
-    st.title("📊 Dashboard de Ventas")
-    
-    conn = get_connection()
-    df = pd.read_sql("SELECT * FROM registros_ventas ORDER BY fecha DESC", conn)
-    conn.close()
-    
-    if not df.empty:
-        # Métricas principales
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Autoliquidable", int(df["autoliquidable"].sum()))
-        col2.metric("Oferta", int(df["oferta"].sum()))
-        col3.metric("Marca Propia", int(df["marca_propia"].sum()))
-        col4.metric("Producto Adicional", int(df["producto_adicional"].sum()))
-        
-        # Gráfico por empleado
-        st.subheader("📊 Ventas por Empleado")
-        ventas_por_empleado = df.groupby("empleado")[["autoliquidable","oferta","marca_propia","producto_adicional"]].sum()
-        st.bar_chart(ventas_por_empleado)
-        
-        # Ventas por fecha
-        st.subheader("📅 Ventas por Fecha")
-        ventas_por_fecha = df.groupby("fecha")[["autoliquidable","oferta","marca_propia","producto_adicional"]].sum()
-        st.line_chart(ventas_por_fecha)
-        
-        # Mostrar datos recientes
-        st.subheader("📋 Ventas Recientes")
-        st.dataframe(df.head(20), use_container_width=True)
-        
-        # Botón para exportar
-        if st.button("📥 Exportar a Excel", use_container_width=True):
-            excel = df.to_excel(index=False, engine='openpyxl')
-            st.download_button("Descargar Excel", excel, "ventas_completas.xlsx")
-    else:
-        st.info("📭 Aún no hay datos registrados")
 
 # -------------------- MENÚ LATERAL --------------------
 with st.sidebar:
-    # Botón para ocultar/mostrar menú
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.markdown("### 📋 Menú")
-    with col2:
-        if st.button("🔽" if st.session_state.menu_visible else "▶️", key="toggle_menu"):
-            st.session_state.menu_visible = not st.session_state.menu_visible
-            st.rerun()
-    
-    st.markdown("---")
-    
-    # Mostrar información del usuario en el sidebar
-    deptos_df = obtener_empleados_por_departamento()
-    deptos_text = ""
-    if not deptos_df.empty:
-        deptos_text = " • ".join([f"{row['departamento']}: {row['cantidad']}" for _, row in deptos_df.iterrows()])
-    
-    st.markdown(f"""
-    <div style="
-        background-color: #f0f2f6;
-        padding: 10px;
-        border-radius: 10px;
-        margin-bottom: 20px;
-    ">
-        <strong>👤 {st.session_state.usuario_actual}</strong><br>
-        <small>{datetime.now().strftime('%H:%M')} - {datetime.now().strftime('%d/%m')}</small><br>
-        <small>Total: {len(st.session_state.empleados)} empleados</small><br>
-        <small style="font-size: 0.8em;">{deptos_text}</small>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Menú de navegación (visible u oculto)
-    if st.session_state.menu_visible:
-        # Definir las opciones del menú
-        menu_options = {
-            "Empleados": "👥",
-            "Dashboard": "📊",
-            "Config": "⚙️",
-            "Usuarios": "👤",
-            "Backup": "💾",
-            "Sistema": "🖥️"
-        }
-        
-        # Crear botones para cada opción
-        for opcion, icono in menu_options.items():
-            # Determinar si es la página actual
-            es_activo = st.session_state.pagina_actual == opcion
-            
-            # Estilo para botón activo
-            if es_activo:
-                button_type = "primary"
-            else:
-                button_type = "secondary"
-            
-            if st.button(
-                f"{icono} {opcion}",
-                key=f"menu_{opcion}",
-                use_container_width=True,
-                type=button_type
-            ):
-                st.session_state.pagina_actual = opcion
-                st.rerun()
-        
+    if 'autenticado' not in st.session_state or not st.session_state.autenticado:
+        st.markdown("### 🔐 Sistema de Ventas")
         st.markdown("---")
         st.caption("© 2024 Locatel Restrepo")
     else:
-        # Mostrar solo íconos cuando el menú está oculto
-        st.markdown("### ")
-        cols = st.columns(1)
-        with cols[0]:
-            # Versión mini con solo íconos
-            menu_icons = {
-                "Empleados": "👥",
-                "Dashboard": "📊", 
-                "Config": "⚙️",
-                "Usuarios": "👤",
-                "Backup": "💾",
-                "Sistema": "🖥️"
-            }
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown("### 📋 Menú")
+        with col2:
+            if st.button("🔽" if st.session_state.menu_visible else "▶️", key="toggle_menu"):
+                st.session_state.menu_visible = not st.session_state.menu_visible
+                st.rerun()
+        
+        st.markdown("---")
+        
+        # Información del usuario
+        color_rol = {
+            "Administrador": "#ff4444",
+            "Supervisor": "#ffaa00", 
+            "Vendedor": "#00aa00"
+        }.get(st.session_state.usuario_rol, "#666")
+        
+        st.markdown(f"""
+        <div style="
+            background: linear-gradient(135deg, {color_rol}20 0%, {color_rol}10 100%);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            border-left: 5px solid {color_rol};
+        ">
+            <strong style="color: {color_rol};">👤 {st.session_state.usuario_actual}</strong><br>
+            <span style="color: {color_rol};">{st.session_state.usuario_rol}</span><br>
+            <small>{datetime.now().strftime('%H:%M')} - {datetime.now().strftime('%d/%m/%Y')}</small>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Menú según rol
+        if st.session_state.menu_visible:
+            if st.session_state.usuario_rol == "Vendedor":
+                menu_options = {"Registro Ventas": "📝"}
+            elif st.session_state.usuario_rol == "Supervisor":
+                menu_options = {"Registro Ventas": "📝", "Dashboard": "📊", "Empleados": "👥"}
+            else:
+                menu_options = {"Empleados": "👥", "Dashboard": "📊", "Config": "⚙️", 
+                               "Usuarios": "👤", "Backup": "💾", "Sistema": "🖥️"}
             
+            for opcion, icono in menu_options.items():
+                es_activo = st.session_state.pagina_actual == opcion
+                if st.button(f"{icono} {opcion}", key=f"menu_{opcion}", 
+                           use_container_width=True, type="primary" if es_activo else "secondary"):
+                    st.session_state.pagina_actual = opcion
+                    st.rerun()
+            
+            st.markdown("---")
+            if st.button("🚪 Cerrar Sesión", use_container_width=True):
+                cerrar_sesion()
+            st.caption("© 2024 Locatel Restrepo")
+        else:
+            menu_icons = {"Registro Ventas": "📝", "Dashboard": "📊", "Empleados": "👥", 
+                         "Config": "⚙️", "Usuarios": "👤", "Backup": "💾", "Sistema": "🖥️"}
             for opcion, icono in menu_icons.items():
                 if st.button(icono, key=f"mini_{opcion}", help=opcion):
                     st.session_state.pagina_actual = opcion
                     st.rerun()
+            if st.button("🚪", key="mini_logout", help="Cerrar sesión"):
+                cerrar_sesion()
 
-# -------------------- CONTENIDO PRINCIPAL --------------------
-# Mostrar el título de la página actual
-st.markdown(f"# {st.session_state.pagina_actual}")
-
-# Navegación
-if st.session_state.pagina_actual == "Empleados":
-    pagina_empleados()
-elif st.session_state.pagina_actual == "Dashboard":
-    pagina_dashboard()
-elif st.session_state.pagina_actual == "Config":
-    pagina_config()
-elif st.session_state.pagina_actual == "Usuarios":
-    pagina_usuarios()
-elif st.session_state.pagina_actual == "Backup":
-    pagina_backup()
-elif st.session_state.pagina_actual == "Sistema":
-    pagina_sistema()
+# -------------------- NAVEGACIÓN PRINCIPAL --------------------
+if 'autenticado' not in st.session_state or not st.session_state.autenticado:
+    pagina_login()
+else:
+    if st.session_state.pagina_actual == "Login":
+        pagina_login()
+    elif st.session_state.pagina_actual == "Registro Ventas":
+        pagina_registro_ventas()
+    elif st.session_state.pagina_actual == "Empleados":
+        pagina_empleados()
+    elif st.session_state.pagina_actual == "Dashboard":
+        pagina_dashboard()
+    elif st.session_state.pagina_actual == "Config":
+        pagina_config()
+    elif st.session_state.pagina_actual == "Usuarios":
+        pagina_usuarios()
+    elif st.session_state.pagina_actual == "Backup":
+        pagina_backup()
+    elif st.session_state.pagina_actual == "Sistema":
+        pagina_sistema()
