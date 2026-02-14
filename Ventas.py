@@ -777,288 +777,542 @@ def pagina_usuarios():
     
     st.title("👤 Administración de Usuarios")
     
-    tab1, tab2, tab3 = st.tabs(["👥 Gestión de Usuarios", "➕ Usuario desde Empleado", "👑 Crear Admin/Supervisor"])
+    # Estilos CSS personalizados
+    st.markdown("""
+    <style>
+    /* Tarjetas de métricas */
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1.5rem;
+        border-radius: 15px;
+        color: white;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    .metric-card .metric-value {
+        font-size: 2.5rem;
+        font-weight: bold;
+        margin: 0;
+    }
+    .metric-card .metric-label {
+        font-size: 1rem;
+        opacity: 0.9;
+        margin: 0;
+    }
     
-    with tab1:
+    /* Tarjetas de usuario */
+    .user-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 1rem;
+        padding: 1rem 0;
+    }
+    .user-card-modern {
+        background: white;
+        border-radius: 15px;
+        padding: 1.2rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        border: 1px solid #f0f0f0;
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+    .user-card-modern:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+    }
+    .user-card-modern::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 5px;
+    }
+    .user-card-modern.admin::before { background: linear-gradient(90deg, #ff4444, #ff8888); }
+    .user-card-modern.supervisor::before { background: linear-gradient(90deg, #ffaa00, #ffcc00); }
+    .user-card-modern.vendedor::before { background: linear-gradient(90deg, #00aa00, #44cc44); }
+    
+    /* Avatar */
+    .user-avatar {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 2rem;
+        margin-right: 1rem;
+    }
+    .avatar-admin { background: linear-gradient(135deg, #ff444420, #ff888820); color: #ff4444; }
+    .avatar-supervisor { background: linear-gradient(135deg, #ffaa0020, #ffcc0020); color: #ffaa00; }
+    .avatar-vendedor { background: linear-gradient(135deg, #00aa0020, #44cc4420); color: #00aa00; }
+    
+    /* Badges */
+    .role-badge {
+        padding: 0.3rem 1rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        font-weight: 500;
+        display: inline-block;
+    }
+    .badge-admin { background: #ff444420; color: #ff4444; }
+    .badge-supervisor { background: #ffaa0020; color: #ffaa00; }
+    .badge-vendedor { background: #00aa0020; color: #00aa00; }
+    
+    .status-badge {
+        padding: 0.2rem 0.8rem;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    .status-active { background: #00aa0020; color: #00aa00; }
+    .status-inactive { background: #ff444420; color: #ff4444; }
+    
+    /* Botones de acción */
+    .action-buttons {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1rem;
+        justify-content: flex-end;
+    }
+    .action-btn {
+        border: none;
+        background: none;
+        padding: 0.5rem;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 1rem;
+    }
+    .action-btn:hover {
+        background: #f0f0f0;
+        transform: scale(1.1);
+    }
+    .action-btn.delete:hover { color: #ff4444; }
+    .action-btn.deactivate:hover { color: #ffaa00; }
+    .action-btn.activate:hover { color: #00aa00; }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    tabs = st.tabs([
+        "📊 Dashboard Usuarios",
+        "👥 Gestión de Usuarios",
+        "➕ Usuario desde Empleado",
+        "👑 Crear Admin/Supervisor"
+    ])
+    
+    with tabs[0]:  # Dashboard
+        col1, col2, col3, col4 = st.columns(4)
+        
         usuarios_df = cargar_usuarios_db()
         if not usuarios_df.empty:
-            # Estilos personalizados para las tarjetas
-            st.markdown("""
-            <style>
-            .user-card {
-                background: white;
-                border-radius: 10px;
-                padding: 1rem;
-                margin: 0.5rem 0;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                border-left: 5px solid;
-                transition: transform 0.2s;
-            }
-            .user-card:hover {
-                transform: translateX(5px);
-                box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-            }
-            .admin-card { border-left-color: #ff4444; }
-            .supervisor-card { border-left-color: #ffaa00; }
-            .vendedor-card { border-left-color: #00aa00; }
-            </style>
-            """, unsafe_allow_html=True)
+            with col1:
+                st.markdown(f"""
+                <div class="metric-card">
+                    <p class="metric-value">{len(usuarios_df)}</p>
+                    <p class="metric-label">Total Usuarios</p>
+                </div>
+                """, unsafe_allow_html=True)
             
-            # Métricas rápidas
-            col_metric1, col_metric2, col_metric3, col_metric4 = st.columns(4)
-            with col_metric1:
-                st.metric("Total Usuarios", len(usuarios_df))
-            with col_metric2:
-                st.metric("Administradores", len(usuarios_df[usuarios_df['rol'] == 'Administrador']))
-            with col_metric3:
-                st.metric("Supervisores", len(usuarios_df[usuarios_df['rol'] == 'Supervisor']))
-            with col_metric4:
-                st.metric("Vendedores", len(usuarios_df[usuarios_df['rol'] == 'Vendedor']))
+            with col2:
+                admin_count = len(usuarios_df[usuarios_df['rol'] == 'Administrador'])
+                st.markdown(f"""
+                <div class="metric-card" style="background: linear-gradient(135deg, #ff4444 0%, #ff8888 100%);">
+                    <p class="metric-value">{admin_count}</p>
+                    <p class="metric-label">Administradores</p>
+                </div>
+                """, unsafe_allow_html=True)
             
-            st.markdown("---")
+            with col3:
+                sup_count = len(usuarios_df[usuarios_df['rol'] == 'Supervisor'])
+                st.markdown(f"""
+                <div class="metric-card" style="background: linear-gradient(135deg, #ffaa00 0%, #ffcc00 100%);">
+                    <p class="metric-value">{sup_count}</p>
+                    <p class="metric-label">Supervisores</p>
+                </div>
+                """, unsafe_allow_html=True)
             
-            # Mostrar usuarios en tarjetas
-            for idx, row in usuarios_df.iterrows():
-                # Determinar clase CSS según rol
-                rol_class = {
-                    'Administrador': 'admin-card',
-                    'Supervisor': 'supervisor-card',
-                    'Vendedor': 'vendedor-card'
-                }.get(row['rol'], '')
+            with col4:
+                ven_count = len(usuarios_df[usuarios_df['rol'] == 'Vendedor'])
+                st.markdown(f"""
+                <div class="metric-card" style="background: linear-gradient(135deg, #00aa00 0%, #44cc44 100%);">
+                    <p class="metric-value">{ven_count}</p>
+                    <p class="metric-label">Vendedores</p>
+                </div>
+                """, unsafe_allow_html=True)
+            
+            # Gráfico de distribución
+            st.markdown("### 📊 Distribución por Rol")
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                import plotly.express as px
+                roles_df = usuarios_df['rol'].value_counts().reset_index()
+                roles_df.columns = ['Rol', 'Cantidad']
                 
-                # Color del rol para texto
-                color_rol = {
-                    'Administrador': '#ff4444',
-                    'Supervisor': '#ffaa00',
-                    'Vendedor': '#00aa00'
-                }.get(row['rol'], '#666')
+                colors = {'Administrador': '#ff4444', 'Supervisor': '#ffaa00', 'Vendedor': '#00aa00'}
+                fig = px.pie(roles_df, values='Cantidad', names='Rol', 
+                           color='Rol', color_discrete_map=colors,
+                           title="Distribución de Roles")
+                fig.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col_chart2:
+                # Activos vs Inactivos
+                status_df = usuarios_df['activo'].value_counts().reset_index()
+                status_df.columns = ['Estado', 'Cantidad']
+                status_df['Estado'] = status_df['Estado'].map({1: 'Activos', 0: 'Inactivos'})
                 
-                # Estado badge
-                estado_badge = "🟢 Activo" if row['activo'] else "🔴 Inactivo"
-                
-                with st.container():
+                fig2 = px.bar(status_df, x='Estado', y='Cantidad', 
+                            color='Estado', 
+                            color_discrete_map={'Activos': '#00aa00', 'Inactivos': '#ff4444'},
+                            title="Estado de Usuarios")
+                fig2.update_layout(showlegend=False)
+                st.plotly_chart(fig2, use_container_width=True)
+    
+    with tabs[1]:  # Gestión de Usuarios
+        usuarios_df = cargar_usuarios_db()
+        
+        if not usuarios_df.empty:
+            # Filtros
+            col_filter1, col_filter2, col_filter3 = st.columns(3)
+            with col_filter1:
+                rol_filter = st.multiselect(
+                    "Filtrar por Rol",
+                    options=['Administrador', 'Supervisor', 'Vendedor'],
+                    default=[]
+                )
+            with col_filter2:
+                status_filter = st.multiselect(
+                    "Filtrar por Estado",
+                    options=['Activo', 'Inactivo'],
+                    default=[]
+                )
+            with col_filter3:
+                search = st.text_input("🔍 Buscar usuario", placeholder="Nombre de usuario...")
+            
+            # Aplicar filtros
+            filtered_df = usuarios_df.copy()
+            if rol_filter:
+                filtered_df = filtered_df[filtered_df['rol'].isin(rol_filter)]
+            if status_filter:
+                status_map = {'Activo': 1, 'Inactivo': 0}
+                filtered_df = filtered_df[filtered_df['activo'].isin([status_map[s] for s in status_filter])]
+            if search:
+                filtered_df = filtered_df[filtered_df['username'].str.contains(search, case=False)]
+            
+            # Mostrar usuarios en grid
+            st.markdown(f"### 👥 Usuarios Encontrados ({len(filtered_df)})")
+            
+            # Crear grid de usuarios
+            cols = st.columns(2)
+            for idx, (_, row) in enumerate(filtered_df.iterrows()):
+                with cols[idx % 2]:
+                    # Determinar clase según rol
+                    rol_class = row['rol'].lower()
+                    avatar_class = f"avatar-{rol_class}"
+                    
+                    # Color del rol
+                    colors = {
+                        'Administrador': '#ff4444',
+                        'Supervisor': '#ffaa00',
+                        'Vendedor': '#00aa00'
+                    }
+                    color = colors.get(row['rol'], '#666')
+                    
+                    # Estado
+                    estado = "Activo" if row['activo'] else "Inactivo"
+                    estado_class = "status-active" if row['activo'] else "status-inactive"
+                    
+                    # Avatar (inicial del usuario)
+                    avatar_letter = row['username'][0].upper() if row['username'] else '?'
+                    
                     st.markdown(f"""
-                    <div class="user-card {rol_class}">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div style="display: flex; align-items: center; gap: 15px;">
-                                <div style="
-                                    width: 40px;
-                                    height: 40px;
-                                    background: {color_rol}20;
-                                    border-radius: 50%;
-                                    display: flex;
-                                    align-items: center;
-                                    justify-content: center;
-                                    color: {color_rol};
-                                    font-size: 20px;
-                                ">
-                                    👤
-                                </div>
-                                <div>
-                                    <strong style="font-size: 1.1em;">{row['username']}</strong><br>
-                                    <span style="color: #666; font-size: 0.9em;">
-                                        {row['empleado'] if row['empleado'] else 'Sin empleado asociado'}
-                                    </span>
-                                </div>
+                    <div class="user-card-modern {rol_class}">
+                        <div style="display: flex; align-items: center; margin-bottom: 1rem;">
+                            <div class="user-avatar {avatar_class}">
+                                {avatar_letter}
                             </div>
-                            <div style="text-align: right;">
-                                <span style="
-                                    background: {color_rol}20;
-                                    color: {color_rol};
-                                    padding: 4px 12px;
-                                    border-radius: 15px;
-                                    font-size: 0.9em;
-                                    font-weight: bold;
-                                ">
-                                    {row['rol']}
-                                </span>
-                                <div style="margin-top: 5px;">
-                                    <span style="color: #666; font-size: 0.85em;">
-                                        📅 {row['ultimo_acceso'][:10] if row['ultimo_acceso'] else 'Nunca'}
-                                    </span>
+                            <div style="flex-grow: 1;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <h3 style="margin: 0; font-size: 1.2rem;">{row['username']}</h3>
+                                    <span class="role-badge badge-{rol_class}">{row['rol']}</span>
                                 </div>
+                                <p style="margin: 0.2rem 0 0 0; color: #666; font-size: 0.9rem;">
+                                    {row['empleado'] if row['empleado'] else 'Sin empleado asociado'}
+                                </p>
                             </div>
                         </div>
-                    </div>
+                        
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.5rem;">
+                            <div>
+                                <span class="status-badge {estado_class}">{estado}</span>
+                                <span style="color: #999; font-size: 0.8rem; margin-left: 0.5rem;">
+                                    📅 {row['ultimo_acceso'][:10] if row['ultimo_acceso'] else 'Nunca'}
+                                </span>
+                            </div>
+                            
+                            <div class="action-buttons">
                     """, unsafe_allow_html=True)
                     
-                    # Botones de acción debajo de la tarjeta
-                    if row['username'] != 'admin':  # No permitir eliminar al admin principal
-                        col_acc1, col_acc2, col_acc3, col_acc4 = st.columns([1, 1, 1, 5])
-                        with col_acc1:
-                            # Botón de activar/desactivar con estilo
+                    if row['username'] != 'admin':
+                        col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
+                        
+                        with col_btn1:
                             if row['activo']:
-                                if st.button("🔌 Desactivar", key=f"deactivate_{row['username']}", 
-                                           help="Desactivar usuario"):
+                                if st.button("🔌", key=f"deact_{row['username']}", help="Desactivar usuario"):
                                     toggle_usuario_activo(row['username'], 0)
                                     st.rerun()
                             else:
-                                if st.button("🔓 Activar", key=f"activate_{row['username']}",
-                                           help="Activar usuario"):
+                                if st.button("🔓", key=f"act_{row['username']}", help="Activar usuario"):
                                     toggle_usuario_activo(row['username'], 1)
                                     st.rerun()
                         
-                        with col_acc2:
-                            # Botón de eliminar
-                            if st.button("🗑️ Eliminar", key=f"delete_{row['username']}",
-                                       help="Eliminar permanentemente"):
-                                st.session_state[f"confirm_delete_{row['username']}"] = True
+                        with col_btn2:
+                            if st.button("🗑️", key=f"del_{row['username']}", help="Eliminar usuario"):
+                                st.session_state[f"confirm_del_{row['username']}"] = True
                                 st.rerun()
                         
-                        # Confirmación de eliminación
-                        if f"confirm_delete_{row['username']}" in st.session_state:
-                            st.warning(f"⚠️ ¿Eliminar usuario '{row['username']}' permanentemente?")
-                            with col_acc3:
-                                if st.button("✅ Sí", key=f"confirm_yes_{row['username']}"):
+                        with col_btn3:
+                            if f"confirm_del_{row['username']}" in st.session_state:
+                                st.markdown("""
+                                <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                                            background: white; padding: 2rem; border-radius: 15px;
+                                            box-shadow: 0 10px 40px rgba(0,0,0,0.2); z-index: 1000;">
+                                    <h4>¿Confirmar eliminación?</h4>
+                                    <p style="color: #666;">Esta acción no se puede deshacer</p>
+                                    <div style="display: flex; gap: 1rem; justify-content: center;">
+                                """, unsafe_allow_html=True)
+                                
+                                if st.button("✅ Sí", key=f"conf_yes_{row['username']}"):
                                     if eliminar_usuario_db(row['username']):
-                                        st.success(f"✅ Usuario eliminado")
-                                        del st.session_state[f"confirm_delete_{row['username']}"]
+                                        del st.session_state[f"confirm_del_{row['username']}"]
                                         st.rerun()
-                                if st.button("❌ No", key=f"confirm_no_{row['username']}"):
-                                    del st.session_state[f"confirm_delete_{row['username']}"]
+                                if st.button("❌ No", key=f"conf_no_{row['username']}"):
+                                    del st.session_state[f"confirm_del_{row['username']}"]
                                     st.rerun()
+                                
+                                st.markdown("</div></div>", unsafe_allow_html=True)
                     
-                    st.markdown("<br>", unsafe_allow_html=True)
-            
+                    st.markdown("</div></div></div>", unsafe_allow_html=True)
         else:
             st.info("📭 No hay usuarios registrados")
     
-    with tab2:
+    with tabs[2]:  # Usuario desde Empleado
         empleados_sin_usuario = obtener_empleados_sin_usuario()
         
         if empleados_sin_usuario:
             st.markdown("""
             <div style="
-                background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
-                padding: 20px;
-                border-radius: 10px;
-                margin-bottom: 20px;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                padding: 2rem;
+                border-radius: 15px;
+                margin-bottom: 2rem;
+                color: white;
+                text-align: center;
             ">
-                <h3 style="margin:0; color: #667eea;">📋 Crear Usuario para Empleado</h3>
-                <p style="color: #666; margin-top: 5px;">
-                    Convierte a un empleado en usuario del sistema con rol de Vendedor
+                <h2 style="margin: 0; font-size: 2rem;">📋 Convertir Empleado en Usuario</h2>
+                <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">
+                    Asigna acceso al sistema a un empleado con rol de Vendedor
                 </p>
             </div>
             """, unsafe_allow_html=True)
             
-            with st.form("form_usuario_empleado"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
+            col_form1, col_form2 = st.columns([1, 1])
+            
+            with col_form1:
+                with st.form("form_usuario_empleado_modern"):
+                    st.markdown("#### 📝 Datos del Usuario")
+                    
                     empleado = st.selectbox(
-                        "👤 Seleccionar empleado",
+                        "👤 Seleccionar Empleado",
                         empleados_sin_usuario,
-                        help="Selecciona el empleado que tendrá acceso al sistema"
-                    )
-                    username = st.text_input(
-                        "🔑 Usuario",
-                        placeholder="Ej: jperez",
-                        help="Nombre de usuario para iniciar sesión"
-                    )
-                
-                with col2:
-                    password = st.text_input(
-                        "🔒 Contraseña",
-                        type="password",
-                        placeholder="********",
-                        help="Contraseña segura para el usuario"
+                        help="Empleado que tendrá acceso al sistema"
                     )
                     
-                    # Generador de contraseña simple
-                    import random
-                    import string
-                    if st.form_submit_button("🎲 Generar contraseña", type="secondary"):
-                        chars = string.ascii_letters + string.digits + "!@#$%"
-                        suggested = ''.join(random.choice(chars) for _ in range(10))
-                        st.session_state['suggested_password'] = suggested
-                
-                if st.form_submit_button("🚀 Crear usuario vendedor", use_container_width=True):
-                    if username and password:
-                        exito, mensaje = crear_usuario_empleado(username, password, empleado)
-                        if exito:
-                            st.success(f"✅ {mensaje}")
-                            st.balloons()
-                            st.rerun()
+                    username = st.text_input(
+                        "🔑 Nombre de Usuario",
+                        placeholder="ej: jperez",
+                        help="Nombre único para iniciar sesión"
+                    )
+                    
+                    col_pass1, col_pass2 = st.columns([3, 1])
+                    with col_pass1:
+                        password = st.text_input(
+                            "🔒 Contraseña",
+                            type="password",
+                            placeholder="********",
+                            help="Mínimo 8 caracteres"
+                        )
+                    
+                    with col_pass2:
+                        import random
+                        import string
+                        if st.form_submit_button("🎲 Generar", help="Generar contraseña aleatoria"):
+                            chars = string.ascii_letters + string.digits + "!@#$%"
+                            suggested = ''.join(random.choice(chars) for _ in range(10))
+                            st.session_state['suggested_pass'] = suggested
+                    
+                    if 'suggested_pass' in st.session_state:
+                        st.info(f"🔑 Contraseña sugerida: `{st.session_state['suggested_pass']}`")
+                    
+                    st.markdown("---")
+                    submitted = st.form_submit_button("🚀 Crear Usuario Vendedor", use_container_width=True)
+                    
+                    if submitted:
+                        if username and password:
+                            if len(password) >= 8:
+                                exito, mensaje = crear_usuario_empleado(username, password, empleado)
+                                if exito:
+                                    st.success(f"✅ {mensaje}")
+                                    st.balloons()
+                                    st.rerun()
+                                else:
+                                    st.error(f"❌ {mensaje}")
+                            else:
+                                st.error("❌ La contraseña debe tener al menos 8 caracteres")
                         else:
-                            st.error(f"❌ {mensaje}")
-                    else:
-                        st.error("❌ Todos los campos son obligatorios")
+                            st.error("❌ Todos los campos son obligatorios")
+            
+            with col_form2:
+                st.markdown("#### 📋 Empleados Disponibles")
+                for emp in empleados_sin_usuario[:5]:  # Mostrar solo los primeros 5
+                    st.markdown(f"""
+                    <div style="
+                        background: #f8f9fa;
+                        padding: 0.8rem;
+                        border-radius: 10px;
+                        margin: 0.5rem 0;
+                        border-left: 5px solid #667eea;
+                    ">
+                        <strong>{emp}</strong>
+                    </div>
+                    """, unsafe_allow_html=True)
                 
-                if 'suggested_password' in st.session_state:
-                    st.info(f"🔑 Contraseña sugerida: `{st.session_state['suggested_password']}`")
+                if len(empleados_sin_usuario) > 5:
+                    st.info(f"... y {len(empleados_sin_usuario) - 5} empleados más")
         else:
             st.success("""
             <div style="
                 background: #00aa0020;
-                padding: 40px;
-                border-radius: 10px;
+                padding: 4rem;
+                border-radius: 20px;
                 text-align: center;
-                border: 2px dashed #00aa00;
+                border: 3px dashed #00aa00;
+                margin: 2rem 0;
             ">
-                <h2 style="color: #00aa00;">✅ ¡Todos los empleados tienen usuario!</h2>
+                <h1 style="color: #00aa00; font-size: 3rem;">✅</h1>
+                <h2 style="color: #00aa00;">¡Todos los empleados tienen usuario!</h2>
                 <p style="color: #666;">No hay empleados pendientes de asignación</p>
             </div>
             """, unsafe_allow_html=True)
     
-    with tab3:
+    with tabs[3]:  # Crear Admin/Supervisor
         st.markdown("""
         <div style="
-            background: linear-gradient(135deg, #ff444420 0%, #ffaa0020 100%);
-            padding: 20px;
-            border-radius: 10px;
-            margin-bottom: 20px;
+            background: linear-gradient(135deg, #ff4444 0%, #ffaa00 100%);
+            padding: 2rem;
+            border-radius: 15px;
+            margin-bottom: 2rem;
+            color: white;
+            text-align: center;
         ">
-            <h3 style="margin:0; color: #ff4444;">👑 Crear Usuario Administrativo</h3>
-            <p style="color: #666; margin-top: 5px;">
+            <h2 style="margin: 0; font-size: 2rem;">👑 Crear Usuario Administrativo</h2>
+            <p style="margin: 0.5rem 0 0 0; opacity: 0.9;">
                 Crea usuarios con permisos de Administrador o Supervisor
             </p>
         </div>
         """, unsafe_allow_html=True)
         
-        with st.form("form_admin"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
+        col_admin1, col_admin2 = st.columns([1, 1])
+        
+        with col_admin1:
+            with st.form("form_admin_modern"):
+                st.markdown("#### 📝 Datos del Usuario")
+                
                 username = st.text_input(
                     "👤 Usuario",
-                    placeholder="Ej: admin2",
+                    placeholder="ej: admin2",
                     help="Nombre de usuario único"
                 )
+                
                 password = st.text_input(
                     "🔒 Contraseña",
                     type="password",
                     placeholder="********",
                     help="Mínimo 8 caracteres"
                 )
-            
-            with col2:
+                
+                # Medidor de fortaleza de contraseña
+                if password:
+                    strength = 0
+                    if len(password) >= 8:
+                        strength += 25
+                    if any(c.isupper() for c in password):
+                        strength += 25
+                    if any(c.islower() for c in password):
+                        strength += 25
+                    if any(c in "!@#$%^&*" for c in password):
+                        strength += 25
+                    
+                    st.progress(strength/100, text=f"Fortaleza: {strength}%")
+                
                 rol = st.selectbox(
                     "🎯 Rol",
                     ["Administrador", "Supervisor"],
-                    help="Selecciona el nivel de permisos"
+                    help="Nivel de permisos del usuario"
                 )
                 
-                # Verificador de fortaleza de contraseña
-                if password and len(password) >= 8:
-                    st.success("✅ Contraseña fuerte")
-                elif password:
-                    st.warning("⚠️ Mínimo 8 caracteres")
-            
-            submitted = st.form_submit_button("✨ Crear usuario administrativo", use_container_width=True)
-            
-            if submitted:
-                if username and password:
-                    if len(password) >= 8:
-                        if crear_usuario_db(username, password, rol):
-                            st.success(f"✅ Usuario {username} creado exitosamente")
-                            st.balloons()
-                            st.rerun()
+                st.markdown("---")
+                submitted = st.form_submit_button("✨ Crear Usuario", use_container_width=True)
+                
+                if submitted:
+                    if username and password:
+                        if len(password) >= 8:
+                            if crear_usuario_db(username, password, rol):
+                                st.success(f"✅ Usuario {username} creado exitosamente")
+                                st.balloons()
+                                st.rerun()
+                            else:
+                                st.error("❌ El usuario ya existe")
                         else:
-                            st.error("❌ El usuario ya existe")
+                            st.error("❌ La contraseña debe tener al menos 8 caracteres")
                     else:
-                        st.error("❌ La contraseña debe tener al menos 8 caracteres")
-                else:
-                    st.error("❌ Todos los campos son obligatorios")
+                        st.error("❌ Todos los campos son obligatorios")
+        
+        with col_admin2:
+            st.markdown("#### ℹ️ Información de Roles")
+            
+            st.markdown("""
+            <div style="
+                background: #f8f9fa;
+                padding: 1.5rem;
+                border-radius: 15px;
+            ">
+                <div style="margin-bottom: 1.5rem;">
+                    <h4 style="color: #ff4444; margin: 0;">👑 Administrador</h4>
+                    <p style="color: #666; margin: 0.5rem 0;">Acceso completo al sistema:</p>
+                    <ul style="color: #666;">
+                        <li>✓ Gestión de usuarios</li>
+                        <li>✓ Configuración del sistema</li>
+                        <li>✓ Backup y restauración</li>
+                        <li>✓ Todos los módulos</li>
+                    </ul>
+                </div>
+                
+                <div>
+                    <h4 style="color: #ffaa00; margin: 0;">👁️ Supervisor</h4>
+                    <p style="color: #666; margin: 0.5rem 0;">Acceso de supervisión:</p>
+                    <ul style="color: #666;">
+                        <li>✓ Dashboard de ventas</li>
+                        <li>✓ Gestión de empleados</li>
+                        <li>✓ Ver registros de ventas</li>
+                        <li>✓ Reportes</li>
+                    </ul>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 def pagina_backup():
     if not verificar_permiso("Administrador"):
