@@ -16,10 +16,10 @@ import gzip
 import shutil
 from pathlib import Path
 # Al inicio de Ventas.py, después de los imports
-import sys
-st.write("Python version:", sys.version)
-st.write("Current directory:", os.getcwd())
-st.write("Files in directory:", os.listdir())
+#import sys
+#st.write("Python version:", sys.version)
+#st.write("Current directory:", os.getcwd())
+#st.write("Files in directory:", os.listdir())
 
 # -------------------- CONFIGURACIÓN INICIAL --------------------
 st.set_page_config(
@@ -1507,11 +1507,11 @@ def pagina_backup():
                 
                 if backup_file and os.path.exists(backup_file):
                     with open(backup_file, "rb") as f:
-                        st.download_button(
-                            "📥 Descargar Backup",
-                            f,
-                            backup_file,
-                            "application/octet-stream",
+                        btn = st.download_button(
+                            label="📥 Descargar Backup",
+                            data=f,
+                            file_name=backup_file,
+                            mime="application/gzip",
                             use_container_width=True
                         )
                     st.success(f"✅ Backup creado: {backup_file}")
@@ -1528,14 +1528,15 @@ def pagina_backup():
             help="Archivos .db o .gz"
         )
         
-        if archivo and st.button("Restaurar", use_container_width=True, type="primary"):
-            with st.spinner("Restaurando backup..."):
-                if restaurar_backup(archivo):
-                    st.success("✅ Backup restaurado correctamente")
-                    st.info("🔄 La aplicación se reiniciará")
-                    st.rerun()
-                else:
-                    st.error("❌ Error al restaurar backup")
+        if archivo is not None:
+            if st.button("Restaurar", use_container_width=True, type="primary"):
+                with st.spinner("Restaurando backup..."):
+                    if restaurar_backup(archivo):
+                        st.success("✅ Backup restaurado correctamente")
+                        st.info("🔄 La aplicación se reiniciará")
+                        st.rerun()
+                    else:
+                        st.error("❌ Error al restaurar backup")
 
 def pagina_sistema():
     """Información del sistema"""
