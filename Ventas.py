@@ -642,27 +642,45 @@ def init_session_state():
 
 def pagina_login():
     """Página de inicio de sesión"""
+    
+    # CSS específico solo para el login
     st.markdown("""
     <style>
-    .main {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    /* Reset para el contenedor principal */
+    .main > div {
+        padding: 0 !important;
     }
+    
+    /* Ocultar elementos de Streamlit que interfieren */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    
+    /* Estilos del login */
     .login-container {
         display: flex;
         justify-content: center;
         align-items: center;
-        min-height: 100vh;
-        padding: 20px;
+        height: 100vh;
+        width: 100vw;
+        position: fixed;
+        top: 0;
+        left: 0;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        margin: 0;
+        padding: 0;
     }
+    
     .login-box {
         background: white;
-        padding: 3rem;
+        padding: 2.5rem;
         border-radius: 20px;
         box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-        width: 100%;
-        max-width: 450px;
+        width: 90%;
+        max-width: 400px;
         animation: slideUp 0.5s ease;
     }
+    
     @keyframes slideUp {
         from {
             opacity: 0;
@@ -673,29 +691,98 @@ def pagina_login():
             transform: translateY(0);
         }
     }
+    
     .login-header {
         text-align: center;
         margin-bottom: 2rem;
     }
+    
     .login-header h1 {
         color: #667eea;
-        font-size: 2rem;
-        margin: 0;
+        font-size: 1.8rem;
+        margin: 0.5rem 0 0 0;
+        font-weight: 600;
     }
+    
     .login-header p {
         color: #666;
         margin: 0.5rem 0 0 0;
+        font-size: 0.9rem;
     }
+    
     .login-icon {
-        font-size: 4rem;
-        margin-bottom: 1rem;
+        font-size: 3.5rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Ocultar el texto de "Powered by Streamlit" */
+    .stApp [data-testid="stDecoration"] {
+        display: none;
+    }
+    
+    /* Asegurar que el formulario se vea bien */
+    .stForm {
+        background-color: transparent !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+    
+    .stForm [data-testid="stForm"] {
+        border: none !important;
+        padding: 0 !important;
+        background-color: transparent !important;
+    }
+    
+    /* Estilos para los inputs */
+    .stTextInput input {
+        border-radius: 10px !important;
+        border: 1px solid #e0e0e0 !important;
+        padding: 0.75rem !important;
+    }
+    
+    .stTextInput input:focus {
+        border-color: #667eea !important;
+        box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.1) !important;
+    }
+    
+    /* Estilo para el botón */
+    .stButton button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 10px !important;
+        padding: 0.75rem 2rem !important;
+        font-weight: 600 !important;
+        font-size: 1rem !important;
+        transition: transform 0.2s !important;
+        width: 100% !important;
+    }
+    
+    .stButton button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3) !important;
+    }
+    
+    /* Ajustar el expander */
+    .streamlit-expanderHeader {
+        color: #666 !important;
+        background-color: #f8f9fa !important;
+        border-radius: 10px !important;
+        border: none !important;
+    }
+    
+    /* Ocultar elementos flotantes */
+    .stAlert {
+        margin-top: 1rem !important;
     }
     </style>
     """, unsafe_allow_html=True)
     
+    # Contenedor principal del login
     st.markdown('<div class="login-container">', unsafe_allow_html=True)
     st.markdown('<div class="login-box">', unsafe_allow_html=True)
     
+    # Header
     st.markdown("""
     <div class="login-header">
         <div class="login-icon">🏥</div>
@@ -704,27 +791,26 @@ def pagina_login():
     </div>
     """, unsafe_allow_html=True)
     
-    with st.form("login_form"):
+    # Formulario de login
+    with st.form("login_form", clear_on_submit=False):
         username = st.text_input(
             "👤 Usuario",
             placeholder="Ingresa tu usuario",
-            help="Usuario proporcionado por el administrador"
+            key="login_username"
         )
         
         password = st.text_input(
             "🔑 Contraseña",
             type="password",
             placeholder="Ingresa tu contraseña",
-            help="Contraseña segura"
+            key="login_password"
         )
         
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            submitted = st.form_submit_button(
-                "Iniciar Sesión",
-                use_container_width=True,
-                type="primary"
-            )
+        submitted = st.form_submit_button(
+            "Iniciar Sesión",
+            use_container_width=True,
+            type="primary"
+        )
         
         if submitted:
             if username and password:
@@ -743,21 +829,20 @@ def pagina_login():
                     else:
                         st.session_state.pagina_actual = "Dashboard"
                     
-                    st.success("✅ ¡Bienvenido!")
                     st.rerun()
                 else:
                     st.error("❌ Usuario o contraseña incorrectos")
             else:
                 st.warning("⚠️ Por favor ingresa todos los campos")
     
+    # Credenciales de prueba
     with st.expander("ℹ️ Credenciales de prueba"):
         st.markdown("""
         **Administrador:** admin / admin123  
         **Supervisor:** supervisor / super123  
-        **Vendedor:** (crear desde gestión de usuarios)
         """)
     
-    st.markdown("</div></div>", unsafe_allow_html=True)
+    st.markdown('</div></div>', unsafe_allow_html=True)
 
 def pagina_registro_ventas():
     """Página para registro de ventas"""
