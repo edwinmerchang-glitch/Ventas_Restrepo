@@ -15,6 +15,11 @@ import string
 import gzip
 import shutil
 from pathlib import Path
+# Al inicio de Ventas.py, después de los imports
+import sys
+st.write("Python version:", sys.version)
+st.write("Current directory:", os.getcwd())
+st.write("Files in directory:", os.listdir())
 
 # -------------------- CONFIGURACIÓN INICIAL --------------------
 st.set_page_config(
@@ -103,8 +108,9 @@ def init_database():
 
 # -------------------- FUNCIONES DE BASE DE DATOS --------------------
 def get_connection():
-    """Obtiene conexión a la base de datos con timeout"""
-    return sqlite3.connect("ventas.db", timeout=30, check_same_thread=False)
+    """Obtiene conexión a la base de datos"""
+    # Quita check_same_thread=False
+    return sqlite3.connect("ventas.db", timeout=30)
 
 @safe_db_operation
 def create_tables():
@@ -535,27 +541,22 @@ def guardar_config(config):
 
 # -------------------- FUNCIONES DE BACKUP --------------------
 def crear_backup():
-    """Crea backup de la base de datos"""
+    """Crea backup en memoria para descarga"""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_name = f"backup_ventas_{timestamp}.db"
     
     try:
         if os.path.exists("ventas.db"):
-            # Crear copia de seguridad
-            shutil.copy2("ventas.db", backup_name)
+            # Leer el archivo en memoria
+            with open("ventas.db", "rb") as f:
+                db_content = f.read()
             
-            # Comprimir backup
-            with open(backup_name, "rb") as f_in:
-                with gzip.open(f"{backup_name}.gz", "wb") as f_out:
-                    shutil.copyfileobj(f_in, f_out)
+            # Comprimir en memoria
+            compressed = gzip.compress(db_content)
             
-            os.remove(backup_name)
-            logger.info(f"✅ Backup creado: {backup_name}.gz")
-            return f"{backup_name}.gz"
+            return compressed, f"backup_ventas_{timestamp}.db.gz"
     except Exception as e:
         logger.error(f"Error creando backup: {e}")
-        return None
-
+        return None, None
 def restaurar_backup(archivo):
     """Restaura un backup"""
     try:
